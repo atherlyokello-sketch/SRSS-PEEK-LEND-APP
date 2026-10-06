@@ -1,130 +1,52 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PeekLens - Secure Feed</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <link rel="manifest" href="manifest.json">
-  <meta name="theme-color" content="#0f172a">
-  <style>
-    * {
-      -webkit-touch-callout: none !important;
-      -webkit-user-select: none !important;
-      user-select: none !important;
-    }
-    body {
-      background-color: #0f172a;
-      color: #f8fafc;
-      touch-action: none;
-    }
-    canvas {
-      pointer-events: none;
-    }
-  </style>
-</head>
-<body class="min-h-screen flex flex-col justify-between p-4">
+<script>
+  let currentUser = null;
 
-  <!-- Header -->
-  <header class="flex justify-between items-center pb-4 border-b border-slate-800">
-    <h1 class="text-xl font-bold text-cyan-400 flex items-center gap-2">
-      <span>🔒</span> PeekLens Group
-    </h1>
-    <div id="user-display" class="text-xs text-slate-400 font-mono">Not logged in</div>
-  </header>
-
-  <!-- Login Modal -->
-  <div id="login-modal" class="fixed inset-0 bg-slate-950/95 flex items-center justify-center p-4 z-50">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
-      <h2 class="text-lg font-bold text-white text-center">Join Group Feed</h2>
-      <p class="text-xs text-slate-400 text-center">Enter your name to join the group and send/receive view-once photos.</p>
-      <input type="text" id="username-input" placeholder="Your Name" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 text-white">
-      <button onclick="handleLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-3 rounded-lg transition-all text-sm">Join Group</button>
-    </div>
-  </div>
-
-  <!-- Main Content Area -->
-  <main class="flex-1 my-4 flex flex-col justify-between max-w-md mx-auto w-full">
+  function handleLogin() {
+    const input = document.getElementById('username-input');
+    const username = input.value.trim();
     
-    <!-- Tab Navigation -->
-    <div class="flex border-b border-slate-800 mb-4 text-center">
-      <button id="tab-feed" onclick="switchTab('feed')" class="flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm">Group Feed</button>
-      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">My Private Snaps</button>
-      <button id="tab-logs" onclick="switchTab('logs')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">Violations</button>
-    </div>
+    if (!username) {
+      alert('Please enter a name');
+      return;
+    }
 
-    <!-- Group Feed Tab -->
-    <div id="view-feed" class="space-y-4 flex-1">
-      <div class="flex items-center justify-between">
-        <span class="text-xs font-semibold text-slate-400 tracking-wider uppercase">Active Group Broadcasts</span>
-        <button onclick="openSendModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1">
-          <span>📷</span> Post Group Photo
-        </button>
-      </div>
+    currentUser = username;
+    document.getElementById('user-display').textContent = `@${currentUser}`;
+    document.getElementById('login-modal').classList.add('hidden');
+    loadGroupFeed();
+  }
 
-      <div id="group-feed-list" class="space-y-3">
-        <div class="text-xs text-slate-500 text-center py-8">Loading group photos...</div>
-      </div>
-    </div>
+  function switchTab(tab) {
+    // Hide all tabs
+    ['feed', 'reactions', 'logs'].forEach(t => {
+      document.getElementById(`view-${t}`).classList.add('hidden');
+      const tabBtn = document.getElementById(`tab-${t}`);
+      tabBtn.classList.remove('text-cyan-400', 'border-cyan-400');
+      tabBtn.classList.add('text-slate-400', 'border-transparent');
+    });
 
-    <!-- Private Viewer Reactions Tab -->
-    <div id="view-reactions" class="space-y-3 hidden flex-1">
-      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Private Reaction Selfies (Sent Only To You)</div>
-      <div id="reactions-list" class="grid grid-cols-2 gap-3">
-        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>
-      </div>
-    </div>
+    // Activate selected tab
+    document.getElementById(`view-${tab}`).classList.remove('hidden');
+    const activeBtn = document.getElementById(`tab-${tab}`);
+    activeBtn.classList.add('text-cyan-400', 'border-cyan-400');
+    activeBtn.classList.remove('text-slate-400', 'border-transparent');
+  }
 
-    <!-- Security Logs Tab -->
-    <div id="view-logs" class="space-y-3 hidden flex-1">
-      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Group Violation Alerts</div>
-      <div id="logs-list" class="space-y-2">
-        <div class="text-xs text-slate-500 text-center py-8">No security violations reported.</div>
-      </div>
-    </div>
+  function openSendModal() {
+    document.getElementById('send-modal').classList.remove('hidden');
+  }
 
-  </main>
+  function closeSendModal() {
+    document.getElementById('send-modal').classList.add('hidden');
+  }
 
-  <!-- Photo Viewer Overlay Modal -->
-  <div id="viewer-modal" class="fixed inset-0 bg-black z-50 hidden flex-col justify-between p-4">
-    <!-- Top Warning Header -->
-    <div class="flex justify-between items-center">
-      <div id="face-status" class="text-xs text-yellow-400 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span> Place & Hold 2 Fingers to View (1.3s Max)
-      </div>
-      <button onclick="closeAndDestroyViewer('Manual Exit')" class="bg-red-600/80 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded-md">Exit</button>
-    </div>
+  function closeAndDestroyViewer(reason) {
+    document.getElementById('viewer-modal').classList.add('hidden');
+    console.log(`Viewer closed: ${reason}`);
+  }
 
-    <!-- Canvas Photo Container -->
-    <div id="touch-hold-zone" class="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-xl border border-dashed border-cyan-500/50 bg-slate-950 select-none">
-      
-      <!-- Live Camera Preview Box -->
-      <div class="absolute top-3 right-3 w-20 h-24 bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-lg z-20 flex items-center justify-center">
-        <video id="webcam-feed" autoplay playsinline muted class="w-full h-full object-cover -scale-x-100"></video>
-      </div>
-
-      <div id="hold-instruction" class="text-center p-6 space-y-2">
-        <div class="text-3xl">✌️</div>
-        <div class="text-xs font-bold text-cyan-400">Press & Hold with 2 Fingers</div>
-        <div class="text-[10px] text-slate-400">Photo reveals for 1.3 seconds max. Front camera snaps your reaction!</div>
-      </div>
-      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden"></canvas>
-    </div>
-
-    <!-- Bottom Timer & Status Bar -->
-    <div class="text-center space-y-1">
-      <div id="timer-bar-container" class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden hidden">
-        <div id="timer-bar" class="bg-cyan-400 h-full w-full transition-all duration-[1300ms] linear"></div>
-      </div>
-      <p class="text-[10px] text-slate-500">🔒 Photo self-destructs instantly after viewing or lifting fingers.</p>
-    </div>
-  </div>
-
-  <!-- Send Photo Modal -->
-  <div id="send-modal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-50 hidden">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4">
-      <h3 class="text-sm font-bold text-white">Broadcast Photo to Group</h3>
-      <p class="text-xs text-slate-400">Requires 2-finger hold for 1.3 seconds to view. Self-destructs completely upon viewing.</p>
-      <input type="file" id="photo-input" accept="image/*" capture="environment" class="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-cyan-900/50 file:text-cyan-300 hover:file:bg-cyan-900">
-      <div class="flex gap-2">
-        <button onclick="closeSendModal()" class="flex-1 bg-slate-800 text-slate-300 text-xs py-2.5
+  function loadGroupFeed() {
+    const list = document.getElementById('group-feed-list');
+    list.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">No group photos posted yet.</div>`;
+  }
+</script>
