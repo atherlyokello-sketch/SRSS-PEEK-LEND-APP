@@ -461,35 +461,69 @@
       const file = fileInput.files[0];
       if (!file) return alert('Select an image');
 
-      // FIX: validate the file before upload. Previously any file type was
-      // accepted and silently attempted, and large images would blow past
-      // Firestore's ~1MB document size limit with no explanation to the user.
       if (!file.type.startsWith('image/')) {
         return alert('Please select an image file.');
       }
-      if (file.size > 700 * 1024) {
-        return alert('That image is too large to broadcast (max ~700KB as a data URL). Please choose a smaller photo.');
+
+      // Phone photos are several MB, but Firestore documents max out at ~1MB.
+      // Resize + re-compress in the browser so any photo can be posted.
+      let dataUrl;
+      try {
+        dataUrl = await compressImage(file);
+      } catch (err) {
+        console.error("Image processing failed:", err);
+        return alert('Could not process that image. Please try a different photo.');
+      }
+      if (!dataUrl) {
+        return alert('That image could not be shrunk enough to broadcast. Please try a different photo.');
       }
 
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          await addDoc(collection(db, "messages"), {
-            senderId: currentUser.id,
-            senderName: currentUser.name,
-            imageData: e.target.result,
-            createdAt: serverTimestamp()
-          });
-          closeSendModal();
-          fileInput.value = '';
-          alert('Photo broadcasted successfully to the group feed!');
-        } catch (err) {
-          console.error("Broadcast failed:", err);
-          alert('Broadcast failed: ' + (err.message || 'unknown error'));
-        }
-      };
-      reader.readAsDataURL(file);
+      try {
+        await addDoc(collection(db, "messages"), {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          imageData: dataUrl,
+          createdAt: serverTimestamp()
+        });
+        closeSendModal();
+        fileInput.value = '';
+        alert('Photo broadcasted successfully to the group feed!');
+      } catch (err) {
+        console.error("Broadcast failed:", err);
+        alert('Broadcast failed: ' + (err.message || 'unknown error'));
+      }
     };
+
+    // Downscale to a max edge, then lower JPEG quality / size until the
+    // data URL fits comfortably under Firestore's 1MB document limit.
+    function compressImage(file, maxBytes = 700 * 1024) {
+      return new Promise((resolve, reject) => {
+        const url = URL.createObjectURL(file);
+        const img = new Image();
+        img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
+        img.onload = () => {
+          URL.revokeObjectURL(url);
+          let maxEdge = 1280;
+          let quality = 0.8;
+          for (let attempt = 0; attempt < 8; attempt++) {
+            const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
+            const canvas = document.createElement('canvas');
+            canvas.width = Math.max(1, Math.round(img.width * scale));
+            canvas.height = Math.max(1, Math.round(img.height * scale));
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = '#000';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+            const out = canvas.toDataURL('image/jpeg', quality);
+            if (out.length <= maxBytes * 1.37) return resolve(out); // base64 overhead
+            quality = Math.max(0.4, quality - 0.1);
+            maxEdge = Math.round(maxEdge * 0.8);
+          }
+          resolve(null);
+        };
+        img.src = url;
+      });
+    }
 
     // FIX: wait for the camera to actually have a usable frame before
     // snapping. Previously this read whatever frame happened to be in the
