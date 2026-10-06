@@ -1,9 +1,9 @@
-I <!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>PeekLens - Group Secure Feed</title>
+  <title>PeekLens - Secure Feed</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0f172a">
@@ -16,7 +16,7 @@ I <!DOCTYPE html>
     body {
       background-color: #0f172a;
       color: #f8fafc;
-      touch-action: manipulation;
+      touch-action: none; /* Prevents default mobile scrolling/gestures to ensure strict 2-finger touch */
     }
     canvas {
       pointer-events: none;
@@ -49,7 +49,7 @@ I <!DOCTYPE html>
     <!-- Tab Navigation -->
     <div class="flex border-b border-slate-800 mb-4 text-center">
       <button id="tab-feed" onclick="switchTab('feed')" class="flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm">Group Feed</button>
-      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">View Snaps</button>
+      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">My Private Snaps</button>
       <button id="tab-logs" onclick="switchTab('logs')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">Violations</button>
     </div>
 
@@ -67,11 +67,11 @@ I <!DOCTYPE html>
       </div>
     </div>
 
-    <!-- Viewer Reactions Tab (Selfies Captured) -->
+    <!-- Private Viewer Reactions Tab -->
     <div id="view-reactions" class="space-y-3 hidden flex-1">
-      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Reaction Selfies Captured</div>
+      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Private Reaction Selfies (Sent to You)</div>
       <div id="reactions-list" class="grid grid-cols-2 gap-3">
-        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No viewer selfies recorded yet.</div>
+        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>
       </div>
     </div>
 
@@ -90,20 +90,28 @@ I <!DOCTYPE html>
     <!-- Top Warning Header -->
     <div class="flex justify-between items-center">
       <div id="face-status" class="text-xs text-yellow-400 flex items-center gap-2">
-        <span class="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span> Active Camera: Capturing Viewer Reaction Snap...
+        <span class="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span> Place & Hold 2 Fingers to View (1.3s Max)
       </div>
       <button onclick="closeAndDestroyViewer('Manual Exit')" class="bg-red-600/80 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded-md">Exit</button>
     </div>
 
-    <!-- Canvas Photo Container -->
-    <div class="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-xl border border-slate-800 bg-slate-950">
-      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain"></canvas>
+    <!-- Canvas Photo Container (Target for 2-finger press and hold) -->
+    <div id="touch-hold-zone" class="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-xl border border-dashed border-cyan-500/50 bg-slate-950 select-none">
+      <div id="hold-instruction" class="text-center p-6 space-y-2">
+        <div class="text-3xl">✌️</div>
+        <div class="text-xs font-bold text-cyan-400">Press & Hold with 2 Fingers</div>
+        <div class="text-[10px] text-slate-400">Photo reveals for 1.3 seconds max. Front camera will snap you!</div>
+      </div>
+      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden"></canvas>
       <video id="webcam-feed" autoplay playsinline muted class="hidden"></video>
     </div>
 
-    <!-- Bottom Watermark Warning -->
-    <div class="text-center">
-      <p class="text-[10px] text-slate-500">🔒 Camera Live: Your reaction photo is captured and sent to the sender upon viewing.</p>
+    <!-- Bottom Timer & Status Bar -->
+    <div class="text-center space-y-1">
+      <div id="timer-bar-container" class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden hidden">
+        <div id="timer-bar" class="bg-cyan-400 h-full w-full transition-all duration-[1300ms] linear"></div>
+      </div>
+      <p class="text-[10px] text-slate-500">🔒 Lifting fingers or leaving screen destroys the photo instantly.</p>
     </div>
   </div>
 
@@ -111,7 +119,7 @@ I <!DOCTYPE html>
   <div id="send-modal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4">
       <h3 class="text-sm font-bold text-white">Broadcast Photo to Group</h3>
-      <p class="text-xs text-slate-400">This photo can be viewed ONCE by each member. Front camera will snap viewer's face when opened.</p>
+      <p class="text-xs text-slate-400">Requires 2-finger hold for 1.3 seconds to view. Front camera snaps viewer automatically.</p>
       <input type="file" id="photo-input" accept="image/*" capture="environment" class="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-cyan-900/50 file:text-cyan-300 hover:file:bg-cyan-900">
       <div class="flex gap-2">
         <button onclick="closeSendModal()" class="flex-1 bg-slate-800 text-slate-300 text-xs py-2.5 rounded-lg">Cancel</button>
@@ -123,7 +131,7 @@ I <!DOCTYPE html>
   <!-- Firebase Integration Script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc, updateDoc, query, where, orderBy, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, where, orderBy, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
@@ -140,6 +148,9 @@ I <!DOCTYPE html>
     let currentUser = JSON.parse(localStorage.getItem('peeklens_user') || 'null');
     let currentActiveMessage = null;
     let cameraStream = null;
+    let viewTimer = null;
+    let isHolding = false;
+    let storedImageData = null;
 
     // Login Handler
     window.handleLogin = async () => {
@@ -162,7 +173,7 @@ I <!DOCTYPE html>
       document.getElementById('user-display').innerText = `Member: ${currentUser.name}`;
       document.getElementById('login-modal').classList.add('hidden');
       listenToGroupFeed();
-      listenToReactions();
+      listenToPrivateReactions();
       listenToViolations();
     }
 
@@ -212,15 +223,20 @@ I <!DOCTYPE html>
       });
     }
 
-    // Listen to Reaction Selfies
-    function listenToReactions() {
-      const q = query(collection(db, "reactions"), orderBy("createdAt", "desc"));
+    // Privately Listen ONLY to Reaction Selfies
+    function listenToPrivateReactions() {
+      const q = query(
+        collection(db, "reactions"), 
+        where("senderId", "==", currentUser.id),
+        orderBy("createdAt", "desc")
+      );
+      
       onSnapshot(q, (snapshot) => {
         const list = document.getElementById('reactions-list');
         list.innerHTML = '';
 
         if (snapshot.empty) {
-          list.innerHTML = '<div class="col-span-2 text-xs text-slate-500 text-center py-8">No viewer selfies recorded yet.</div>';
+          list.innerHTML = '<div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>';
           return;
         }
 
@@ -230,7 +246,9 @@ I <!DOCTYPE html>
             <div class="p-2 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
               <img src="${data.reactionImage}" class="w-full h-32 object-cover rounded-lg border border-slate-800">
               <div class="text-[11px] font-bold text-slate-200">${data.viewerName}</div>
-              <div class="text-[9px] text-cyan-400">Viewed ${data.senderName}'s photo</div>
+              <div class="text-[9px] ${data.isViolation ? 'text-red-400 font-bold' : 'text-cyan-400'}">
+                ${data.isViolation ? '🚨 Captured during screenshot attempt!' : 'Viewed via 2-finger hold'}
+              </div>
             </div>
           `;
         });
@@ -253,7 +271,7 @@ I <!DOCTYPE html>
           const log = docSnap.data();
           list.innerHTML += `
             <div class="p-3 bg-red-950/30 border border-red-800/40 rounded-xl space-y-1">
-              <div class="text-xs font-bold text-red-400">🚨 SCREENSHOT / APP SWITCH DETECTED</div>
+              <div class="text-xs font-bold text-red-400">🚨 INTERACTION VIOLATION DETECTED</div>
               <div class="text-[11px] text-slate-300">Offender: <span class="font-bold text-white">${log.offenderName}</span></div>
               <div class="text-[10px] text-slate-400">Original Sender: ${log.senderName}</div>
             </div>
@@ -286,90 +304,165 @@ I <!DOCTYPE html>
       reader.readAsDataURL(file);
     };
 
-    // PHOTO VIEWER, REACTION SNAPPER & SECURITY LOCK SYSTEM
+    function takeCameraFrame() {
+      const video = document.getElementById('webcam-feed');
+      if (!video || !cameraStream) return null;
+      const reactionCanvas = document.createElement('canvas');
+      reactionCanvas.width = 320;
+      reactionCanvas.height = 240;
+      const ctx = reactionCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, reactionCanvas.width, reactionCanvas.height);
+      return reactionCanvas.toDataURL('image/jpeg', 0.6);
+    }
+
+    // OPEN PHOTO VIEWER MODAL
     window.openPhotoViewer = async (msgId, imageData, senderId, senderName) => {
-      currentActiveMessage = { id: msgId, senderName };
+      currentActiveMessage = { id: msgId, senderId, senderName };
+      storedImageData = imageData;
+      
       document.getElementById('viewer-modal').classList.remove('hidden');
       document.getElementById('viewer-modal').classList.add('flex');
+      
+      // Reset UI state
+      document.getElementById('hold-instruction').classList.remove('hidden');
+      document.getElementById('photo-canvas').classList.add('hidden');
+      document.getElementById('timer-bar-container').classList.add('hidden');
 
-      // 📸 AUTOMATIC REACTION SNAPSHOT CAPTURE
+      // Start Camera Stream ready for reaction snap
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
         const video = document.getElementById('webcam-feed');
         video.srcObject = cameraStream;
         await video.play();
+      } catch (err) {
+        console.warn("Camera access denied or unequipped.");
+      }
 
-        // Snapshot face after 1.5s delay
-        setTimeout(async () => {
-          if (!cameraStream) return;
-          const reactionCanvas = document.createElement('canvas');
-          reactionCanvas.width = 320;
-          reactionCanvas.height = 240;
-          const ctx = reactionCanvas.getContext('2d');
-          ctx.drawImage(video, 0, 0, reactionCanvas.width, reactionCanvas.height);
-          
-          const reactionImage = reactionCanvas.toDataURL('image/jpeg', 0.6);
+      // Attach Touch Event Listeners for 2-Finger Hold
+      const zone = document.getElementById('touch-hold-zone');
+      zone.addEventListener('touchstart', handleTouchStart, { passive: false });
+      zone.addEventListener('touchend', handleTouchEnd);
+      zone.addEventListener('touchcancel', handleTouchEnd);
 
+      // Desktop fallback mouse emulation option (optional for testing on PC)
+      zone.addEventListener('mousedown', handleMouseDown);
+      zone.addEventListener('mouseup', handleMouseUp);
+    };
+
+    // HANDLE 2-FINGER TOUCH START
+    async function handleTouchStart(e) {
+      e.preventDefault();
+      if (isHolding || !currentActiveMessage) return;
+
+      // Check if EXACTLY 2 fingers are touching
+      if (e.touches.length === 2) {
+        isHolding = true;
+        await revealPhotoAndSnap();
+      } else if (e.touches.length > 2) {
+        triggerSecurityViolation('Too many fingers or unauthorized capture gesture.');
+      }
+    }
+
+    function handleTouchEnd(e) {
+      if (isHolding) {
+        // If fingers lifted before 1.3s, stop viewing immediately
+        stopViewingAndDestroy();
+      }
+    }
+
+    // Desktop Mouse Fallback (Emulates 2 fingers with Shift + Click)
+    async function handleMouseDown(e) {
+      if (isHolding || !currentActiveMessage) return;
+      if (e.shiftKey) {
+        isHolding = true;
+        await revealPhotoAndSnap();
+      }
+    }
+
+    function handleMouseUp(e) {
+      if (isHolding) {
+        stopViewingAndDestroy();
+      }
+    }
+
+    // REVEAL PHOTO, START 1.3s TIMER, & SNAP SELFIE
+    async function revealPhotoAndSnap() {
+      const { id, senderId, senderName } = currentActiveMessage;
+
+      // 1. Capture Private Reaction Selfie Instantly
+      const reactionSnap = takeCameraFrame();
+      if (reactionSnap) {
+        try {
           await addDoc(collection(db, "reactions"), {
             senderId: senderId,
             senderName: senderName,
             viewerName: currentUser.name,
-            reactionImage: reactionImage,
+            reactionImage: reactionSnap,
+            isViolation: false,
             createdAt: serverTimestamp()
           });
-        }, 1500);
-
-      } catch (err) {
-        console.warn("Front camera permission restricted or unequipped.");
+        } catch(e){}
       }
 
-      // Render image on Canvas with Dynamic Watermarking
+      // 2. Render Photo on Canvas with Watermark
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
       const img = new Image();
-      img.src = imageData;
+      img.src = storedImageData;
       img.onload = () => {
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
 
-        // Watermark stamp
         ctx.font = "bold 24px monospace";
         ctx.fillStyle = "rgba(239, 68, 68, 0.45)";
         ctx.rotate(-0.2);
         for (let i = 0; i < canvas.height; i += 150) {
-          ctx.fillText(`PROTECTED | ${currentUser.name} | DO NOT CAPTURE`, 50, i);
+          ctx.fillText(`PROTECTED | ${currentUser.name} | 1.3s VIEW`, 50, i);
         }
       };
 
-      // Mark photo as viewed in Firestore
-      await updateDoc(doc(db, "group_messages", msgId), {
-        viewedBy: arrayUnion(currentUser.id)
-      });
+      // Switch UI to show photo & timer
+      document.getElementById('hold-instruction').classList.add('hidden');
+      canvas.classList.remove('hidden');
+      
+      const timerContainer = document.getElementById('timer-bar-container');
+      const timerBar = document.getElementById('timer-bar');
+      timerContainer.classList.remove('hidden');
+      timerBar.style.width = '100%';
+      setTimeout(() => { timerBar.style.width = '0%'; }, 50);
 
-      // Attach screenshot & focus listeners
-      window.addEventListener('blur', triggerSecurityViolation);
-      document.addEventListener('visibilitychange', handleVisibilityChange);
-    };
+      // 3. Mark photo as viewed in Firestore (Self-destruct token)
+      try {
+        await updateDoc(doc(db, "group_messages", id), {
+          viewedBy: arrayUnion(currentUser.id)
+        });
+      } catch(e){}
 
-    function handleVisibilityChange() {
-      if (document.hidden) {
-        triggerSecurityViolation();
-      }
+      // 4. Set strict 1.3 second auto-destruction timer
+      viewTimer = setTimeout(() => {
+        stopViewingAndDestroy('Photo expired after 1.3 seconds.');
+      }, 1300);
     }
 
-    async function triggerSecurityViolation() {
-      if (!currentActiveMessage) return;
+    // STOP VIEWING & DESTROY PHOTO
+    function stopViewingAndDestroy(reason) {
+      if (viewTimer) clearTimeout(viewTimer);
+      viewTimer = null;
+      isHolding = false;
 
-      const senderName = currentActiveMessage.senderName;
-      currentActiveMessage = null;
-
-      // Clear canvas
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Log violation
+      closeAndDestroyViewer(reason);
+    }
+
+    async function triggerSecurityViolation(msg) {
+      if (!currentActiveMessage) return;
+      const { senderId, senderName } = currentActiveMessage;
+      
+      const violationSnap = takeCameraFrame();
       try {
         await addDoc(collection(db, "violations"), {
           offenderId: currentUser.id,
@@ -377,14 +470,33 @@ I <!DOCTYPE html>
           senderName: senderName,
           flaggedAt: serverTimestamp()
         });
+
+        if (violationSnap) {
+          await addDoc(collection(db, "reactions"), {
+            senderId: senderId,
+            senderName: senderName,
+            viewerName: currentUser.name,
+            reactionImage: violationSnap,
+            isViolation: true,
+            createdAt: serverTimestamp()
+          });
+        }
       } catch(e){}
 
-      closeAndDestroyViewer('🚨 VIOLATION DETECTED: Screen lost focus/screenshot attempted! Violation logged to group.');
+      stopViewingAndDestroy(msg || '🚨 Security violation detected.');
     }
 
     window.closeAndDestroyViewer = (reason) => {
-      window.removeEventListener('blur', triggerSecurityViolation);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (viewTimer) clearTimeout(viewTimer);
+      viewTimer = null;
+      isHolding = false;
+
+      const zone = document.getElementById('touch-hold-zone');
+      zone.removeEventListener('touchstart', handleTouchStart);
+      zone.removeEventListener('touchend', handleTouchEnd);
+      zone.removeEventListener('touchcancel', handleTouchEnd);
+      zone.removeEventListener('mousedown', handleMouseDown);
+      zone.removeEventListener('mouseup', handleMouseUp);
 
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -392,12 +504,9 @@ I <!DOCTYPE html>
       }
 
       currentActiveMessage = null;
+      storedImageData = null;
       document.getElementById('viewer-modal').classList.add('hidden');
       document.getElementById('viewer-modal').classList.remove('flex');
-      
-      if (reason && reason !== 'Manual Exit') {
-        alert(reason);
-      }
     };
 
     if (currentUser) initApp();
