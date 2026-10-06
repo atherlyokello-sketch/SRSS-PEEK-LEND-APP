@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>PeekLens - Secure View Once</title>
+  
+  <!-- Manifest & PWA Metadata -->
+  <link rel="manifest" href="manifest.json" />
+  <meta name="theme-color" content="#10B981" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'media',
+      theme: {
+        extend: {
+          colors: {
+            brand: { DEFAULT: '#10B981', dark: '#059669' }
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- face-api.js for client-side face detection -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@vladmandic/face-api/dist/face-api.node-wasm.js"></script>
+  
+  <style>
+    body {
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .pb-safe { padding-bottom: env(safe-area-inset-bottom, 1rem); }
+    .pt-safe { padding-top: env(safe-area-inset-top, 1rem); }
+  </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen flex flex-col pt-safe pb-safe">
+
+  <!-- TOP NAVIGATION -->
+  <header class="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 px-4 py-3 flex justify-between items-center shadow-sm">
+    <div class="flex items-center space-x-2">
+      <div class="w-3 h-3 rounded-full bg-brand animate-pulse"></div>
+      <h1 class="font-bold text-lg tracking-wide">PeekLens</h1>
+    </div>
+    <div id="user-profile-badge" class="hidden text-xs bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-200 px-3 py-1 rounded-full font-medium"></div>
+  </header>
+
+  <!-- ALERT BANNER -->
+  <div id="alert-banner" class="hidden bg-amber-500 text-white text-sm px-4 py-2 font-medium flex items-center justify-between shadow-md transition-all">
+    <span id="alert-text"></span>
+    <button onclick="dismissAlert()" class="ml-2 font-bold text-lg">&times;</button>
+  </div>
+
+  <!-- MAIN CONTAINER -->
+  <main class="flex-1 max-w-md w-full mx-auto p-4 flex flex-col justify-center">
+
+    <!-- SCREEN 1: ONBOARDING -->
+    <section id="screen-join" class="space-y-6 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg border border-gray-100 dark:border-gray-700">
+      <div class="text-center space-y-2">
+        <h2 class="text-2xl font-bold">Join Group</h2>
+        <p class="text-sm text-gray-500 dark:text-gray-400">Enter your name so your group can send you view-once photos.</p>
+      </div>
+      <form id="form-join" onsubmit="handleJoin(event)" class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold uppercase tracking-wider mb-1 text-gray-500">Your Name</label>
+          <input type="text" id="input-username" required placeholder="e.g. Alex" maxlength="20"
+            class="w-full px-4 py-3 rounded-xl border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-brand text-lg" />
+        </div>
+        <button type="submit" class="w-full bg-brand hover:bg-brand-dark text-white font-semibold py-3 rounded-xl shadow-md transition-colors text-lg">
+          Start Messaging
+        </button>
+      </form>
+    </section>
+
+    <!-- SCREEN 2: DASHBOARD -->
+    <section id="screen-dashboard" class="hidden space-y-6 flex-1 flex flex-col">
+      <div class="flex border-b border-gray-200 dark:border-gray-700">
+        <button id="tab-friends-btn" onclick="switchTab('friends')" class="flex-1 py-3 text-center font-semibold border-b-2 border-brand text-brand">Friends</button>
+        <button id="tab-inbox-btn" onclick="switchTab('inbox')" class="flex-1 py-3 text-center font-semibold text-gray-500 border-b-2 border-transparent">Inbox</button>
+        <button id="tab-sent-btn" onclick="switchTab('sent')" class="flex-1 py-3 text-center font-semibold text-gray-500 border-b-2 border-transparent">Sent Log</button>
+      </div>
+
+      <div id="tab-friends" class="space-y-3 flex-1 overflow-y-auto">
+        <p class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Select a friend to send a photo</p>
+        <div id="friends-list" class="space-y-2"></div>
+      </div>
+
+      <div id="tab-inbox" class="hidden space-y-3 flex-1 overflow-y-auto">
+        <p class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Received View-Once Photos</p>
+        <div id="inbox-list" class="space-y-2"></div>
+      </div>
+
+      <div id="tab-sent" class="hidden space-y-3 flex-1 overflow-y-auto">
+        <p class="text-xs text-gray-500 uppercase tracking-wider font-semibold">Status of Photos Sent</p>
+        <div id="sent-list" class="space-y-2"></div>
+      </div>
+    </section>
+
+    <!-- SCREEN 3: SEND PHOTO -->
+    <section id="screen-send" class="hidden space-y-6 bg-white dark:bg-gray-800 p-6 rounded-2xl shadow-lg">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-lg">Send to <span id="recipient-name-display" class="text-brand"></span></h3>
+        <button onclick="showDashboard()" class="text-sm text-gray-500 hover:text-gray-700">&larr; Back</button>
+      </div>
+
+      <div class="flex flex-col items-center justify-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-4 bg-gray-50 dark:bg-gray-700 relative min-h-[200px]">
+        <img id="image-preview" class="hidden max-h-64 rounded-lg object-contain mb-2" />
+        <input type="file" id="file-input" accept="image/*" capture="environment" onchange="previewPhoto(event)" class="hidden" />
+        <button onclick="document.getElementById('file-input').click()" class="bg-gray-200 dark:bg-gray-600 text-gray-800 dark:text-gray-100 px-4 py-2 rounded-lg font-medium text-sm">
+          📸 Take or Choose Photo
+        </button>
+      </div>
+
+      <button id="btn-send-photo" onclick="sendPhoto()" disabled class="w-full bg-brand disabled:opacity-50 text-white font-semibold py-3 rounded-xl shadow transition-colors text-lg">
+        Send View-Once Photo
+      </button>
+    </section>
+
+    <!-- POLICY & TERMS AGREEMENT MODAL -->
+    <section id="modal-policy" class="hidden fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+      <div class="bg-white dark:bg-gray-800 max-w-sm w-full rounded-2xl p-6 space-y-4 shadow-2xl border border-gray-200 dark:border-gray-700">
+        <div class="flex items-center space-x-2 text-amber-500">
+          <span class="text-2xl">⚠️</span>
+          <h3 class="font-bold text-lg text-gray-900 dark:text-white">Viewing Policy Terms</h3>
+        </div>
+        <p class="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
+          Before opening this photo, you must agree to the privacy & security terms:
+        </p>
+        <ul class="text-xs text-gray-600 dark:text-gray-300 space-y-2 list-disc list-inside bg-gray-50 dark:bg-gray-700/50 p-3 rounded-xl border border-gray-100 dark:border-gray-600">
+          <li><strong>View-Once:</strong> Photo self-destructs instantly after opening.</li>
+          <li><strong>Front Camera Active:</strong> Front camera scans for 1 face only.</li>
+          <li><strong>Auto-Block:</strong> Leaving the tab, minimizing, taking screenshots, or adding extra faces immediately deletes the image and flags the sender.</li>
+          <li><strong>No Capture:</strong> Recording or capturing photos is strictly prohibited.</li>
+        </ul>
+        
+        <div class="flex items-start space-x-2 pt-2">
+          <input type="checkbox" id="check-policy-agree" onchange="togglePolicyBtn()" class="mt-1 w-4 h-4 text-brand rounded focus:ring-brand" />
+          <label for="check-policy-agree" class="text-xs font-medium text-gray-700 dark:text-gray-200">
+            I understand and agree to the privacy policy terms.
+          </label>
+        </div>
+
+        <div class="flex space-x-2 pt-2">
+          <button onclick="closePolicyModal()" class="flex-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold py-2.5 rounded-xl text-sm">
+            Decline
+          </button>
+          <button id="btn-accept-policy" onclick="confirmAndOpenPhoto()" disabled class="flex-1 bg-brand disabled:opacity-50 text-white font-semibold py-2.5 rounded-xl text-sm transition-colors">
+            Accept & View
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN 4: CAMERA VIEWER -->
+    <section id="screen-viewer" class="hidden fixed inset-0 bg-black z-50 flex flex-col justify-between p-4">
+      <div class="flex justify-between items-center text-white z-10 bg-black/40 p-2 rounded-lg backdrop-blur-sm">
+        <div class="text-xs">
+          <span id="detection-status-indicator" class="inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1"></span>
+          <span id="detection-status-text">Initializing Face Detection...</span>
+        </div>
+        <button onclick="abortViewing('Closed by user')" class="bg-red-600 text-white text-xs px-3 py-1.5 rounded-full font-bold">Exit</button>
+      </div>
+
+      <div class="relative flex-1 my-4 flex items-center justify-center overflow-hidden rounded-2xl bg-gray-950">
+        <video id="viewer-camera" autoplay playsinline muted class="absolute inset-0 w-full h-full object-cover opacity-20 pointer-events-none"></video>
+        
+        <div id="photo-wrapper" class="relative max-w-full max-h-full hidden">
+          <img id="view-photo-element" class="max-w-full max-h-[70vh] rounded-lg object-contain shadow-2xl" />
+        </div>
+
+        <div id="camera-prompt" class="text-center p-6 text-white space-y-3 z-10 bg-black/60 rounded-xl backdrop-blur-md">
+          <p class="text-4xl animate-bounce">🤳</p>
+          <p class="font-semibold text-lg">Position your face in front of the camera</p>
+          <p class="text-xs text-gray-300">Photo will appear when 1 face is detected, and self-destruct if face leaves or extra faces appear.</p>
+        </div>
+      </div>
+
+      <div class="text-center text-gray-400 text-xs py-1">
+        🔒 Terms Accepted. Photo deleted from server on open.
+      </div>
+    </section>
+
+  </main>
+
+  <!-- FIREBASE LOGIC -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+    import { getFirestore, doc, setDoc, getDoc, updateDoc, collection, onSnapshot, query, where, serverTimestamp, deleteField } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCfLEGsSclayQBk2wkm9W3mDAcMMYpa0K4w",
+      authDomain: "srss-peek-lends-app.firebaseapp.com",
+      projectId: "srss-peek-lends-app",
+      storageBucket: "srss-peek-lends-app.firebasestorage.app",
+      messagingSenderId: "858791813722",
+      appId: "1:858791813722:web:38248a7ffd65a07c60ae63"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+
+    window.appState = {
+      user: null,
+      profile: null,
+      selectedRecipient: null,
+      compressedBase64: null,
+      pendingViewingMsgId: null,
+      activeViewingMsgId: null,
+      cameraStream: null,
+      faceDetectionInterval: null,
+      faceApiLoaded: false
+    };
+
+    signInAnonymously(auth).catch(err => console.error(err));
+
+    onAuthStateChanged(auth, async (user) => {
+      if (user) {
+        window.appState.user = user;
+        const localProfile = localStorage.getItem("peeklens_user_profile");
+        if (localProfile) {
+          const profileData = JSON.parse(localProfile);
+          if (profileData.uid === user.uid) {
+            window.appState.profile = profileData;
+            await syncUserProfile(profileData.displayName);
+            showDashboard();
+            return;
+          }
+        }
+        document.getElementById("screen-join").classList.remove("hidden");
+      }
+    });
+
+    window.handleJoin = async function(e) {
+      e.preventDefault();
+      const nameInput = document.getElementById("input-username").value.trim();
+      if (!nameInput || !window.appState.user) return;
+
+      const profile = { uid: window.appState.user.uid, displayName: nameInput };
+      localStorage.setItem("peeklens_user_profile", JSON.stringify(profile));
+      window.appState.profile = profile;
+
+      await syncUserProfile(nameInput);
+      showDashboard();
+    };
+
+    async function syncUserProfile(displayName) {
+      const userRef = doc(db, "users", window.appState.user.uid);
+      await setDoc(userRef, {
+        uid: window.appState.user.uid,
+        displayName: displayName,
+        lastSeen: serverTimestamp()
+      }, { merge: true });
+
+      document.getElementById("user-profile-badge").innerText = displayName;
+      document.getElementById("user-profile-badge").classList.remove("hidden");
+    }
+
+    window.showDashboard = function() {
+      document.getElementById("screen-join").classList.add("hidden");
+      document.getElementById("screen-send").classList.add("hidden");
+      document.getElementById("screen-dashboard").classList.remove("hidden");
+      initRealtimeListeners();
+    };
+
+    window.switchTab = function(tabName) {
+      ['friends', 'inbox', 'sent'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.add("hidden");
+        document.getElementById(`tab-${t}-btn`).classList.remove("border-brand", "text-brand");
+        document.getElementById(`tab-${t}-btn`).classList.add("border-transparent", "text-gray-500");
+      });
+
+      document.getElementById(`tab-${tabName}`).classList.remove("hidden");
+      document.getElementById(`tab-${tabName}-btn`).classList.add("border-brand", "text-brand");
+      document.getElementById(`tab-${tabName}-btn`).classList.remove("border-transparent", "text-gray-500");
+    };
+
+    function initRealtimeListeners() {
+      const uid = window.appState.user.uid;
+
+      onSnapshot(collection(db, "users"), (snapshot) => {
+        const container = document.getElementById("friends-list");
+        container.innerHTML = "";
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.uid === uid) return;
+
+          const card = document.createElement("div");
+          card.className = "flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 cursor-pointer hover:border-brand transition-colors";
+          card.onclick = () => openSendScreen(data);
+          card.innerHTML = `
+            <div class="flex items-center space-x-3">
+              <div class="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-900 text-emerald-800 dark:text-emerald-200 flex items-center justify-center font-bold text-lg">
+                ${data.displayName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p class="font-semibold text-sm">${data.displayName}</p>
+                <p class="text-xs text-gray-400">Tap to send view-once photo</p>
+              </div>
+            </div>
+            <span class="text-brand text-xl">📸</span>
+          `;
+          container.appendChild(card);
+        });
+      });
+
+      const inboxQuery = query(collection(db, "messages"), where("recipientId", "==", uid));
+      onSnapshot(inboxQuery, (snapshot) => {
+        const container = document.getElementById("inbox-list");
+        container.innerHTML = "";
+        snapshot.forEach(docSnap => {
+          const msg = docSnap.data();
+          const id = docSnap.id;
+
+          const card = document.createElement("div");
+          card.className = "flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700";
+
+          let statusText = "";
+          let actionBtn = "";
+
+          if (msg.status === "waiting") {
+            statusText = `<span class="text-brand font-semibold">Ready to View</span>`;
+            actionBtn = `<button onclick="promptPolicyModal('${id}')" class="bg-brand text-white px-4 py-2 rounded-lg font-semibold text-xs shadow">Open Photo</button>`;
+          } else if (msg.status === "opened" || msg.status === "viewed_and_deleted") {
+            statusText = `<span class="text-gray-400 italic">Opened & Expired</span>`;
+            actionBtn = `<span class="text-xs bg-gray-100 dark:bg-gray-700 text-gray-400 px-3 py-1.5 rounded-lg">Opened</span>`;
+          } else if (msg.status === "blocked") {
+            statusText = `<span class="text-red-500 font-medium">Blocked: ${msg.blockReason || 'Security Violation'}</span>`;
+            actionBtn = `<span class="text-xs bg-red-100 text-red-600 px-3 py-1.5 rounded-lg">Blocked</span>`;
+          }
+
+          card.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm">${msg.senderName}</p>
+              <p class="text-xs">${statusText}</p>
+            </div>
+            <div>${actionBtn}</div>
+          `;
+          container.appendChild(card);
+        });
+      });
+
+      const sentQuery = query(collection(db, "messages"), where("senderId", "==", uid));
+      onSnapshot(sentQuery, (snapshot) => {
+        const container = document.getElementById("sent-list");
+        container.innerHTML = "";
+        snapshot.forEach(docSnap => {
+          const msg = docSnap.data();
+          const card = document.createElement("div");
+          card.className = "flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700";
+
+          let statusBadge = "";
+          if (msg.status === "waiting") {
+            statusBadge = `<span class="text-xs bg-amber-100 text-amber-800 px-2.5 py-1 rounded-full font-medium">Waiting...</span>`;
+          } else if (msg.status === "opened") {
+            statusBadge = `<span class="text-xs bg-blue-100 text-blue-800 px-2.5 py-1 rounded-full font-medium">Viewing Now</span>`;
+          } else if (msg.status === "viewed_and_deleted") {
+            statusBadge = `<span class="text-xs bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-medium">Viewed & Deleted</span>`;
+          } else if (msg.status === "blocked") {
+            statusBadge = `<span class="text-xs bg-red-100 text-red-800 px-2.5 py-1 rounded-full font-medium">Blocked: ${msg.blockReason}</span>`;
+          }
+
+          card.innerHTML = `
+            <div>
+              <p class="font-semibold text-sm">To: ${msg.recipientName}</p>
+              <p class="text-xs text-gray-400">${new Date(msg.createdAt?.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) || ''}</p>
+            </div>
+            <div>${statusBadge}</div>
+          `;
+          container.appendChild(card);
+        });
+      });
+    }
+
+    // POLICY MODAL HANDLERS
+    window.promptPolicyModal = function(messageId) {
+      window.appState.pendingViewingMsgId = messageId;
+      document.getElementById("check-policy-agree").checked = false;
+      document.getElementById("btn-accept-policy").disabled = true;
+      document.getElementById("modal-policy").classList.remove("hidden");
+    };
+
+    window.togglePolicyBtn = function() {
+      const checkbox = document.getElementById("check-policy-agree");
+      document.getElementById("btn-accept-policy").disabled = !checkbox.checked;
+    };
+
+    window.closePolicyModal = function() {
+      document.getElementById("modal-policy").classList.add("hidden");
+      window.appState.pendingViewingMsgId = null;
+    };
+
+    window.confirmAndOpenPhoto = function() {
+      const msgId = window.appState.pendingViewingMsgId;
+      document.getElementById("modal-policy").classList.add("hidden");
+      if (msgId) {
+        startPhotoViewer(msgId);
+      }
+    };
+
+    // VIEWER LOGIC
+    window.startPhotoViewer = async function(messageId) {
+      window.appState.activeViewingMsgId = messageId;
+      const msgRef = doc(db, "messages", messageId);
+      const msgSnap = await getDoc(msgRef);
+
+      if (!msgSnap.exists() || msgSnap.data().status !== "waiting") {
+        alert("This message is no longer available.");
+        return;
+      }
+
+      const msgData = msgSnap.data();
+
+      document.getElementById("screen-viewer").classList.remove("hidden");
+      document.getElementById("camera-prompt").classList.remove("hidden");
+      document.getElementById("photo-wrapper").classList.add("hidden");
+
+      const photoEl = document.getElementById("view-photo-element");
+      photoEl.src = msgData.imageData;
+
+      await updateDoc(msgRef, {
+        status: "opened",
+        imageData: deleteField()
+      });
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+          audio: false
+        });
+        window.appState.cameraStream = stream;
+        const videoEl = document.getElementById("viewer-camera");
+        videoEl.srcObject = stream;
+        await videoEl.play();
+      } catch (err) {
+        abortViewing("Camera Permission Denied");
+        return;
+      }
+
+      window.addEventListener("blur", handleSecurityViolation);
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+      window.addEventListener("keyup", handleKeySecurity);
+
+      initFaceDetectionLoop();
+    };
+
+    function handleVisibilityChange() {
+      if (document.hidden) abortViewing("App Minimised or Tab Switched");
+    }
+
+    function handleSecurityViolation() {
+      abortViewing("Window Lost Focus / Screenshot Attempted");
+    }
+
+    function handleKeySecurity(e) {
+      if (e.key === "PrintScreen" || e.keyCode === 44 || (e.metaKey && e.shiftKey)) {
+        abortViewing("Screenshot Key Detected");
+      }
+    }
+
+    function removeSecurityListeners() {
+      window.removeEventListener("blur", handleSecurityViolation);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("keyup", handleKeySecurity);
+    }
+
+    async function initFaceDetectionLoop() {
+      const videoEl = document.getElementById("viewer-camera");
+      const statusText = document.getElementById("detection-status-text");
+      const statusInd = document.getElementById("detection-status-indicator");
+
+      if (!window.appState.faceApiLoaded) {
+        try {
+          statusText.innerText = "Loading Face Engine...";
+          await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/');
+          window.appState.faceApiLoaded = true;
+        } catch (err) {
+          unlockPhotoDisplay();
+          return;
+        }
+      }
+
+      statusText.innerText = "Scanning Face...";
+      statusInd.className = "inline-block w-2 h-2 rounded-full bg-yellow-400 mr-1";
+
+      window.appState.faceDetectionInterval = setInterval(async () => {
+        if (!window.appState.activeViewingMsgId) return;
+
+        try {
+          const detections = await faceapi.detectAllFaces(videoEl, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }));
+
+          if (detections.length === 1) {
+            statusText.innerText = "1 Face Verified";
+            statusInd.className = "inline-block w-2 h-2 rounded-full bg-emerald-500 mr-1";
+            unlockPhotoDisplay();
+          } else if (detections.length === 0) {
+            abortViewing("No face detected in camera feed");
+          } else if (detections.length > 1) {
+            abortViewing("Multiple faces detected in front of screen");
+          }
+        } catch (e) {}
+      }, 700);
+    }
+
+    function unlockPhotoDisplay() {
+      document.getElementById("camera-prompt").classList.add("hidden");
+      document.getElementById("photo-wrapper").classList.remove("hidden");
+    }
+
+    window.abortViewing = async function(reason) {
+      clearInterval(window.appState.faceDetectionInterval);
+      removeSecurityListeners();
+
+      if (window.appState.cameraStream) {
+        window.appState.cameraStream.getTracks().forEach(track => track.stop());
+        window.appState.cameraStream = null;
+      }
+
+      const msgId = window.appState.activeViewingMsgId;
+      if (msgId) {
+        const msgRef = doc(db, "messages", msgId);
+        if (reason === "Closed by user") {
+          await updateDoc(msgRef, { status: "viewed_and_deleted", imageData: deleteField() });
+        } else {
+          await updateDoc(msgRef, { status: "blocked", blockReason: reason, imageData: deleteField() });
+        }
+      }
+
+      document.getElementById("screen-viewer").classList.add("hidden");
+      window.appState.activeViewingMsgId = null;
+
+      if (reason !== "Closed by user") {
+        alert(`View Session Ended: ${reason}`);
+      }
+    };
+
+    window.openSendScreen = function(recipient) {
+      window.appState.selectedRecipient = recipient;
+      document.getElementById("recipient-name-display").innerText = recipient.displayName;
+      document.getElementById("image-preview").classList.add("hidden");
+      document.getElementById("btn-send-photo").disabled = true;
+
+      document.getElementById("screen-dashboard").classList.add("hidden");
+      document.getElementById("screen-send").classList.remove("hidden");
+    };
+
+    window.previewPhoto = function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const img = new Image();
+        img.onload = function() {
+          const canvas = document.createElement("canvas");
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 800;
+
+          if (width > height && width > maxDim) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else if (height > maxDim) {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedData = canvas.toDataURL("image/jpeg", 0.65);
+          window.appState.compressedBase64 = compressedData;
+
+          const previewEl = document.getElementById("image-preview");
+          previewEl.src = compressedData;
+          previewEl.classList.remove("hidden");
+          document.getElementById("btn-send-photo").disabled = false;
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    window.sendPhoto = async function() {
+      const sendBtn = document.getElementById("btn-send-photo");
+      sendBtn.disabled = true;
+      sendBtn.innerText = "Sending...";
+
+      const msgDocRef = doc(collection(db, "messages"));
+      await setDoc(msgDocRef, {
+        senderId: window.appState.user.uid,
+        senderName: window.appState.profile.displayName,
+        recipientId: window.appState.selectedRecipient.uid,
+        recipientName: window.appState.selectedRecipient.displayName,
+        imageData: window.appState.compressedBase64,
+        status: "waiting",
+        createdAt: serverTimestamp()
+      });
+
+      showDashboard();
+      sendBtn.innerText = "Send View-Once Photo";
+    };
+
+    window.dismissAlert = function() {
+      document.getElementById("alert-banner").classList.add("hidden");
+    };
+  </script>
+</body>
+</html>
