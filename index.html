@@ -1,52 +1,597 @@
-<script>
-  let currentUser = null;
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>PeekLens - Secure Feed</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <style>
+    * {
+      -webkit-touch-callout: none !important;
+      -webkit-user-select: none !important;
+      user-select: none !important;
+    }
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      touch-action: none;
+    }
+    canvas {
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between p-4">
 
-  function handleLogin() {
-    const input = document.getElementById('username-input');
-    const username = input.value.trim();
+  <!-- Header -->
+  <header class="flex justify-between items-center pb-4 border-b border-slate-800">
+    <h1 class="text-xl font-bold text-cyan-400 flex items-center gap-2">
+      <span>🔒</span> PeekLens Group
+    </h1>
+    <div class="flex items-center gap-3">
+      <div id="user-display" class="text-xs text-slate-400 font-mono">Not logged in</div>
+      <button onclick="openAdminModal()" class="bg-slate-800 hover:bg-slate-700 text-cyan-400 text-xs px-2.5 py-1 rounded-lg border border-slate-700 font-semibold">Admin</button>
+    </div>
+  </header>
+
+  <!-- Login Modal (For regular users checking membership) -->
+  <div id="login-modal" class="fixed inset-0 bg-slate-950/95 flex items-center justify-center p-4 z-50">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+      <h2 class="text-lg font-bold text-white text-center">Group Access Request</h2>
+      <p class="text-xs text-slate-400 text-center">Enter your name. You can only enter if an Admin has pre-approved your name.</p>
+      <input type="text" id="username-input" placeholder="Your Name" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 text-white">
+      <button onclick="handleLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white font-semibold py-3 rounded-lg transition-all text-sm">Enter Group</button>
+    </div>
+  </div>
+
+  <!-- Admin Login & Portal Modal -->
+  <div id="admin-modal" class="fixed inset-0 bg-slate-950/95 flex items-center justify-center p-4 z-50 hidden">
+    <div id="admin-login-view" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4 shadow-2xl">
+      <div class="flex justify-between items-center">
+        <h2 class="text-lg font-bold text-white">Admin Portal Login</h2>
+        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-white text-xs">✕ Close</button>
+      </div>
+      <p class="text-xs text-slate-400">Enter admin password to manage group members.</p>
+      <input type="password" id="admin-password-input" placeholder="Admin Password" class="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm focus:outline-none focus:border-cyan-500 text-white">
+      <button onclick="handleAdminLogin()" class="w-full bg-red-600 hover:bg-red-500 text-white font-semibold py-3 rounded-lg transition-all text-sm">Access Admin Panel</button>
+    </div>
+
+    <div id="admin-dashboard-view" class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-md space-y-4 shadow-2xl hidden max-h-[90vh] flex flex-col">
+      <div class="flex justify-between items-center pb-2 border-b border-slate-800">
+        <h2 class="text-base font-bold text-red-400">🛡️ Admin Dashboard</h2>
+        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-white text-xs">✕ Close</button>
+      </div>
+      <p class="text-xs text-slate-400">Add names of people allowed to enter the group feed.</p>
+      <div class="flex gap-2">
+        <input type="text" id="new-member-input" placeholder="Member's Name" class="flex-1 bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white">
+        <button onclick="addApprovedMember()" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-4 py-2 rounded-lg font-semibold">Authorize</button>
+      </div>
+      <div class="text-xs font-semibold text-slate-400 mt-2">Pre-Approved Members List:</div>
+      <div id="approved-members-list" class="space-y-2 overflow-y-auto flex-1 max-h-48 pr-1">
+        <div class="text-xs text-slate-500 text-center py-4">Loading members...</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main Content Area -->
+  <main class="flex-1 my-4 flex flex-col justify-between max-w-md mx-auto w-full">
     
-    if (!username) {
-      alert('Please enter a name');
-      return;
+    <!-- Tab Navigation -->
+    <div class="flex border-b border-slate-800 mb-4 text-center">
+      <button id="tab-feed" onclick="switchTab('feed')" class="flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm">Group Feed</button>
+      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">My Private Snaps</button>
+      <button id="tab-logs" onclick="switchTab('logs')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">Violations</button>
+    </div>
+
+    <!-- Group Feed Tab -->
+    <div id="view-feed" class="space-y-4 flex-1">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-semibold text-slate-400 tracking-wider uppercase">Active Group Broadcasts</span>
+        <button onclick="openSendModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white text-xs px-3 py-1.5 rounded-lg font-semibold flex items-center gap-1">
+          <span>📷</span> Post Group Photo
+        </button>
+      </div>
+
+      <div id="group-feed-list" class="space-y-3">
+        <div class="text-xs text-slate-500 text-center py-8">Loading group photos...</div>
+      </div>
+    </div>
+
+    <!-- Private Viewer Reactions Tab -->
+    <div id="view-reactions" class="space-y-3 hidden flex-1">
+      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Private Reaction Selfies (Sent Only To You)</div>
+      <div id="reactions-list" class="grid grid-cols-2 gap-3">
+        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>
+      </div>
+    </div>
+
+    <!-- Security Logs Tab -->
+    <div id="view-logs" class="space-y-3 hidden flex-1">
+      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Group Violation Alerts</div>
+      <div id="logs-list" class="space-y-2">
+        <div class="text-xs text-slate-500 text-center py-8">No security violations reported.</div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- Photo Viewer Overlay Modal -->
+  <div id="viewer-modal" class="fixed inset-0 bg-black z-50 hidden flex-col justify-between p-4">
+    <div class="flex justify-between items-center">
+      <div id="face-status" class="text-xs text-yellow-400 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-yellow-400 animate-ping"></span> Place & Hold 2 Fingers to View (1.3s Max)
+      </div>
+      <button onclick="closeAndDestroyViewer('Manual Exit')" class="bg-red-600/80 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded-md">Exit</button>
+    </div>
+
+    <div id="touch-hold-zone" class="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-xl border border-dashed border-cyan-500/50 bg-slate-950 select-none">
+      <div class="absolute top-3 right-3 w-20 h-24 bg-slate-900 border border-slate-700 rounded-lg overflow-hidden shadow-lg z-20 flex items-center justify-center">
+        <video id="webcam-feed" autoplay playsinline muted class="w-full h-full object-cover -scale-x-100"></video>
+      </div>
+
+      <div id="hold-instruction" class="text-center p-6 space-y-2">
+        <div class="text-3xl">✌️</div>
+        <div class="text-xs font-bold text-cyan-400">Press & Hold with 2 Fingers</div>
+        <div class="text-[10px] text-slate-400">Photo reveals for 1.3 seconds max. Front camera snaps your reaction!</div>
+      </div>
+      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden"></canvas>
+    </div>
+
+    <div class="text-center space-y-1">
+      <div id="timer-bar-container" class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden hidden">
+        <div id="timer-bar" class="bg-cyan-400 h-full w-full transition-all duration-[1300ms] linear"></div>
+      </div>
+      <p class="text-[10px] text-slate-500">🔒 Photo self-destructs instantly after viewing or lifting fingers.</p>
+    </div>
+  </div>
+
+  <!-- Send Photo Modal -->
+  <div id="send-modal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-50 hidden">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4">
+      <h3 class="text-sm font-bold text-white">Broadcast Photo to Group</h3>
+      <p class="text-xs text-slate-400">Requires 2-finger hold for 1.3 seconds to view. Self-destructs completely upon viewing.</p>
+      <input type="file" id="photo-input" accept="image/*" capture="environment" class="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-cyan-900/50 file:text-cyan-300 hover:file:bg-cyan-900">
+      <div class="flex gap-2">
+        <button onclick="closeSendModal()" class="flex-1 bg-slate-800 text-slate-300 text-xs py-2.5 rounded-lg">Cancel</button>
+        <button onclick="submitGroupPhoto()" class="flex-1 bg-cyan-600 text-white text-xs font-semibold py-2.5 rounded-lg">Broadcast</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase Integration Script -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
+      authDomain: "srss-peek-lends-app.firebaseapp.com",
+      projectId: "srss-peek-lends-app",
+      storageBucket: "srss-peek-lends-app.firebasestorage.app",
+      messagingSenderId: "858791813722",
+      appId: "1:858791813722:web:38248a7ffd65a07c60ae63"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getFirestore(app);
+
+    const ADMIN_SECRET = "admin123"; // Change your admin password here if desired
+    let currentUser = JSON.parse(localStorage.getItem('peeklens_user') || 'null');
+    let currentActiveMessage = null;
+    let cameraStream = null;
+    let viewTimer = null;
+    let isHolding = false;
+    let storedImageData = null;
+
+    // Check login state on startup
+    if (currentUser) {
+      document.getElementById('login-modal').classList.add('hidden');
+      initApp();
     }
 
-    currentUser = username;
-    document.getElementById('user-display').textContent = `@${currentUser}`;
-    document.getElementById('login-modal').classList.add('hidden');
-    loadGroupFeed();
-  }
+    // Regular User Login Check against Approved Members Collection
+    window.handleLogin = async () => {
+      const nameInput = document.getElementById('username-input').value.trim();
+      if (!nameInput) return alert('Please enter your name');
 
-  function switchTab(tab) {
-    // Hide all tabs
-    ['feed', 'reactions', 'logs'].forEach(t => {
-      document.getElementById(`view-${t}`).classList.add('hidden');
-      const tabBtn = document.getElementById(`tab-${t}`);
-      tabBtn.classList.remove('text-cyan-400', 'border-cyan-400');
-      tabBtn.classList.add('text-slate-400', 'border-transparent');
-    });
+      // Check if user is pre-approved by admin
+      const q = query(collection(db, "approved_members"), where("name", "==", nameInput));
+      onSnapshot(q, async (snapshot) => {
+        // Handled via verification or direct fetch query
+      }, {once: true});
 
-    // Activate selected tab
-    document.getElementById(`view-${tab}`).classList.remove('hidden');
-    const activeBtn = document.getElementById(`tab-${tab}`);
-    activeBtn.classList.add('text-cyan-400', 'border-cyan-400');
-    activeBtn.classList.remove('text-slate-400', 'border-transparent');
-  }
+      // Quick fetch check
+      import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js").then(async ({getDocs}) => {
+        const querySnapshot = await getDocs(q);
+        if (querySnapshot.empty) {
+          alert('Access Denied: Your name has not been authorized by an Admin yet.');
+          return;
+        }
 
-  function openSendModal() {
-    document.getElementById('send-modal').classList.remove('hidden');
-  }
+        const memberDoc = querySnapshot.docs[0];
+        currentUser = { id: memberDoc.id, name: nameInput };
+        localStorage.setItem('peeklens_user', JSON.stringify(currentUser));
+        document.getElementById('login-modal').classList.add('hidden');
+        initApp();
+      });
+    };
 
-  function closeSendModal() {
-    document.getElementById('send-modal').classList.add('hidden');
-  }
+    // Admin Panel Controls
+    window.openAdminModal = () => {
+      document.getElementById('admin-modal').classList.remove('hidden');
+      document.getElementById('admin-login-view').classList.remove('hidden');
+      document.getElementById('admin-dashboard-view').classList.add('hidden');
+    };
 
-  function closeAndDestroyViewer(reason) {
-    document.getElementById('viewer-modal').classList.add('hidden');
-    console.log(`Viewer closed: ${reason}`);
-  }
+    window.closeAdminModal = () => {
+      document.getElementById('admin-modal').classList.add('hidden');
+    };
 
-  function loadGroupFeed() {
-    const list = document.getElementById('group-feed-list');
-    list.innerHTML = `<div class="text-xs text-slate-400 text-center py-4">No group photos posted yet.</div>`;
-  }
-</script>
+    window.handleAdminLogin = () => {
+      const pass = document.getElementById('admin-password-input').value;
+      if (pass !== ADMIN_SECRET) {
+        return alert('Incorrect Admin Password');
+      }
+      document.getElementById('admin-login-view').classList.add('hidden');
+      document.getElementById('admin-dashboard-view').classList.remove('hidden');
+      listenToApprovedMembers();
+    };
+
+    window.addApprovedMember = async () => {
+      const name = document.getElementById('new-member-input').value.trim();
+      if (!name) return alert('Enter a member name');
+
+      await addDoc(collection(db, "approved_members"), {
+        name: name,
+        addedAt: serverTimestamp()
+      });
+      document.getElementById('new-member-input').value = '';
+      alert(`Member "${name}" successfully authorized!`);
+    };
+
+    function listenToApprovedMembers() {
+      const q = query(collection(db, "approved_members"), orderBy("addedAt", "desc"));
+      onSnapshot(q, (snapshot) => {
+        const list = document.getElementById('approved-members-list');
+        list.innerHTML = '';
+        if (snapshot.empty) {
+          list.innerHTML = '<div class="text-xs text-slate-500 text-center py-2">No authorized members yet.</div>';
+          return;
+        }
+        snapshot.forEach((docSnap) => {
+          const m = docSnap.data();
+          list.innerHTML += `
+            <div class="flex justify-between items-center bg-slate-800 p-2 rounded-lg text-xs">
+              <span class="text-slate-200 font-semibold">${m.name}</span>
+              <button onclick="removeMember('${docSnap.id}')" class="text-red-400 hover:text-red-300 text-[10px]">Revoke</button>
+            </div>
+          `;
+        });
+      });
+    }
+
+    window.removeMember = async (id) => {
+      if (confirm('Revoke access for this user?')) {
+        await deleteDoc(doc(db, "approved_members", id));
+      }
+    };
+
+    function initApp() {
+      if (!currentUser) return;
+      document.getElementById('user-display').innerText = `Member: ${currentUser.name}`;
+      document.getElementById('login-modal').classList.add('hidden');
+      listenToGroupFeed();
+      listenToPrivateReactions();
+      listenToViolations();
+    }
+
+    window.switchTab = (tab) => {
+      ['feed', 'reactions', 'logs'].forEach(t => {
+        document.getElementById(`view-${t}`).classList.add('hidden');
+        document.getElementById(`tab-${t}`).className = "flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm";
+      });
+      document.getElementById(`view-${tab}`).classList.remove('hidden');
+      document.getElementById(`tab-${tab}`).className = "flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm";
+    };
+
+    function listenToGroupFeed() {
+      const q = query(collection(db, "group_messages"), orderBy("createdAt", "desc"));
+      onSnapshot(q, (snapshot) => {
+        const list = document.getElementById('group-feed-list');
+        list.innerHTML = '';
+
+        if (snapshot.empty) {
+          list.innerHTML = '<div class="text-xs text-slate-500 text-center py-8">No active group photos right now</div>';
+          return;
+        }
+
+        snapshot.forEach((docSnap) => {
+          const msg = docSnap.data();
+          list.innerHTML += `
+            <div class="p-3 bg-slate-900 border border-cyan-500/40 rounded-xl flex items-center justify-between">
+              <div>
+                <div class="text-xs font-semibold text-slate-200">From: ${msg.senderName}</div>
+                <div class="text-[10px] text-cyan-400">🔒 1 Unopened Group Photo</div>
+              </div>
+              <button onclick="openPhotoViewer('${docSnap.id}', '${msg.imageData}', '${msg.senderId}', '${msg.senderName}')" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium">View Photo</button>
+            </div>
+          `;
+        });
+      });
+    }
+
+    function listenToPrivateReactions() {
+      if (!currentUser) return;
+      const q = query(collection(db, "reactions"), where("senderId", "==", currentUser.id));
+      
+      onSnapshot(q, (snapshot) => {
+        const list = document.getElementById('reactions-list');
+        list.innerHTML = '';
+
+        if (snapshot.empty) {
+          list.innerHTML = '<div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>';
+          return;
+        }
+
+        let reactions = [];
+        snapshot.forEach((docSnap) => {
+          reactions.push({ id: docSnap.id, ...docSnap.data() });
+        });
+        
+        reactions.sort((a, b) => {
+          let timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          let timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          return timeB - timeA;
+        });
+
+        reactions.forEach((data) => {
+          list.innerHTML += `
+            <div class="p-2 bg-slate-900 border border-slate-800 rounded-xl space-y-1">
+              <img src="${data.reactionImage}" class="w-full h-32 object-cover rounded-lg border border-slate-800">
+              <div class="text-[11px] font-bold text-slate-200">${data.viewerName}</div>
+              <div class="text-[9px] ${data.isViolation ? 'text-red-400 font-bold' : 'text-cyan-400'}">
+                ${data.isViolation ? '🚨 Captured during violation attempt!' : 'Viewed your broadcast'}
+              </div>
+            </div>
+          `;
+        });
+      });
+    }
+
+    function listenToViolations() {
+      const q = query(collection(db, "violations"), orderBy("flaggedAt", "desc"));
+      onSnapshot(q, (snapshot) => {
+        const list = document.getElementById('logs-list');
+        list.innerHTML = '';
+
+        if (snapshot.empty) {
+          list.innerHTML = '<div class="text-xs text-slate-500 text-center py-8">No security violations reported.</div>';
+          return;
+        }
+
+        snapshot.forEach((docSnap) => {
+          const log = docSnap.data();
+          list.innerHTML += `
+            <div class="p-3 bg-red-950/30 border border-red-800/40 rounded-xl space-y-1">
+              <div class="text-xs font-bold text-red-400">🚨 INTERACTION VIOLATION DETECTED</div>
+              <div class="text-[11px] text-slate-300">Offender: <span class="font-bold text-white">${log.offenderName}</span></div>
+              <div class="text-[10px] text-slate-400">Original Sender: ${log.senderName}</div>
+            </div>
+          `;
+        });
+      });
+    }
+
+    window.openSendModal = () => document.getElementById('send-modal').classList.remove('hidden');
+    window.closeSendModal = () => document.getElementById('send-modal').classList.add('hidden');
+
+    window.submitGroupPhoto = () => {
+      const fileInput = document.getElementById('photo-input');
+      const file = fileInput.files[0];
+      if (!file) return alert('Select an image');
+
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        await addDoc(collection(db, "group_messages"), {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          imageData: e.target.result,
+          createdAt: serverTimestamp()
+        });
+        closeSendModal();
+        alert('Photo broadcasted to the group feed!');
+      };
+      reader.readAsDataURL(file);
+    };
+
+    function takeCameraFrame() {
+      const video = document.getElementById('webcam-feed');
+      if (!video || !cameraStream) return null;
+      const reactionCanvas = document.createElement('canvas');
+      reactionCanvas.width = 320;
+      reactionCanvas.height = 240;
+      const ctx = reactionCanvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, reactionCanvas.width, reactionCanvas.height);
+      return reactionCanvas.toDataURL('image/jpeg', 0.6);
+    }
+
+    window.openPhotoViewer = async (msgId, imageData, senderId, senderName) => {
+      currentActiveMessage = { id: msgId, senderId, senderName };
+      storedImageData = imageData;
+      
+      document.getElementById('viewer-modal').classList.remove('hidden');
+      document.getElementById('viewer-modal').classList.add('flex');
+      
+      document.getElementById('hold-instruction').classList.remove('hidden');
+      document.getElementById('photo-canvas').classList.add('hidden');
+      document.getElementById('timer-bar-container').classList.add('hidden');
+
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
+        const video = document.getElementById('webcam-feed');
+        video.srcObject = cameraStream;
+        await video.play();
+      } catch (err) {
+        console.warn("Camera access denied or unequipped.");
+      }
+
+      const zone = document.getElementById('touch-hold-zone');
+      zone.addEventListener('touchstart', handleTouchStart, { passive: false });
+      zone.addEventListener('touchend', handleTouchEnd);
+      zone.addEventListener('touchcancel', handleTouchEnd);
+
+      zone.addEventListener('mousedown', handleMouseDown);
+      zone.addEventListener('mouseup', handleMouseUp);
+    };
+
+    async function handleTouchStart(e) {
+      e.preventDefault();
+      if (isHolding || !currentActiveMessage) return;
+
+      if (e.touches.length === 2) {
+        isHolding = true;
+        await revealPhotoAndSnap();
+      } else if (e.touches.length > 2) {
+        triggerSecurityViolation('Too many fingers or unauthorized capture gesture.');
+      }
+    }
+
+    function handleTouchEnd(e) {
+      if (isHolding) {
+        stopViewingAndDestroy();
+      }
+    }
+
+    async function handleMouseDown(e) {
+      if (isHolding || !currentActiveMessage) return;
+      if (e.shiftKey) {
+        isHolding = true;
+        await revealPhotoAndSnap();
+      }
+    }
+
+    function handleMouseUp(e) {
+      if (isHolding) {
+        stopViewingAndDestroy();
+      }
+    }
+
+    async function revealPhotoAndSnap() {
+      const { id, senderId, senderName } = currentActiveMessage;
+
+      const reactionSnap = takeCameraFrame();
+      if (reactionSnap) {
+        try {
+          await addDoc(collection(db, "reactions"), {
+            senderId: senderId,
+            senderName: senderName,
+            viewerName: currentUser.name,
+            reactionImage: reactionSnap,
+            isViolation: false,
+            createdAt: serverTimestamp()
+          });
+        } catch(e){}
+      }
+
+      const canvas = document.getElementById('photo-canvas');
+      const ctx = canvas.getContext('2d');
+      const img = new Image();
+      img.src = storedImageData;
+      img.onload = () => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
+
+        ctx.font = "bold 24px monospace";
+        ctx.fillStyle = "rgba(239, 68, 68, 0.45)";
+        ctx.rotate(-0.2);
+        for (let i = 0; i < canvas.height; i += 150) {
+          ctx.fillText(`PROTECTED | ${currentUser.name} | 1.3s VIEW`, 50, i);
+        }
+      };
+
+      document.getElementById('hold-instruction').classList.add('hidden');
+      canvas.classList.remove('hidden');
+      
+      const timerContainer = document.getElementById('timer-bar-container');
+      const timerBar = document.getElementById('timer-bar');
+      timerContainer.classList.remove('hidden');
+      timerBar.style.width = '100%';
+      setTimeout(() => { timerBar.style.width = '0%'; }, 50);
+
+      try {
+        await deleteDoc(doc(db, "group_messages", id));
+      } catch(e){}
+
+      viewTimer = setTimeout(() => {
+        stopViewingAndDestroy('Photo expired after 1.3 seconds.');
+      }, 1300);
+    }
+
+    function stopViewingAndDestroy(reason) {
+      if (viewTimer) clearTimeout(viewTimer);
+      viewTimer = null;
+      isHolding = false;
+
+      const canvas = document.getElementById('photo-canvas');
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      closeAndDestroyViewer(reason);
+    }
+
+    async function triggerSecurityViolation(msg) {
+      if (!currentActiveMessage) return;
+      const { senderId, senderName } = currentActiveMessage;
+      
+      const violationSnap = takeCameraFrame();
+      try {
+        await addDoc(collection(db, "violations"), {
+          offenderId: currentUser.id,
+          offenderName: currentUser.name,
+          senderName: senderName,
+          flaggedAt: serverTimestamp()
+        });
+
+        if (violationSnap) {
+          await addDoc(collection(db, "reactions"), {
+            senderId: senderId,
+            senderName: senderName,
+            viewerName: currentUser.name,
+            reactionImage: violationSnap,
+            isViolation: true,
+            createdAt: serverTimestamp()
+          });
+        }
+      } catch(e){}
+
+      stopViewingAndDestroy(msg || '🚨 Security violation detected.');
+    }
+
+    window.closeAndDestroyViewer = (reason) => {
+      if (viewTimer) clearTimeout(viewTimer);
+      viewTimer = null;
+      isHolding = false;
+
+      const zone = document.getElementById('touch-hold-zone');
+      zone.removeEventListener('touchstart', handleTouchStart);
+      zone.removeEventListener('touchend', handleTouchEnd);
+      zone.removeEventListener('touchcancel', handleTouchEnd);
+      zone.removeEventListener('mousedown', handleMouseDown);
+      zone.removeEventListener('mouseup', handleMouseUp);
+
+      if (cameraStream) {
+        cameraStream.getTracks().forEach(track => track.stop());
+        cameraStream = null;
+      }
+
+      currentActiveMessage = null;
+      storedImageData = null;
+      document.getElementById('viewer-modal').classList.add('hidden');
+      document.getElementById('viewer-modal').classList.remove('flex');
+    };
+  </script>
+</body>
+</html>
