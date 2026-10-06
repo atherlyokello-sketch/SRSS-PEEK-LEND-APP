@@ -16,7 +16,7 @@
     body {
       background-color: #0f172a;
       color: #f8fafc;
-      touch-action: none; /* Prevents default mobile scrolling/gestures to ensure strict 2-finger touch */
+      touch-action: none;
     }
     canvas {
       pointer-events: none;
@@ -67,9 +67,9 @@
       </div>
     </div>
 
-    <!-- Private Viewer Reactions Tab -->
+    <!-- Private Viewer Reactions Tab (Only visible to the sender) -->
     <div id="view-reactions" class="space-y-3 hidden flex-1">
-      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Private Reaction Selfies (Sent to You)</div>
+      <div class="text-xs font-semibold text-slate-400 tracking-wider uppercase mb-2">Private Reaction Selfies (Sent Only To You)</div>
       <div id="reactions-list" class="grid grid-cols-2 gap-3">
         <div class="col-span-2 text-xs text-slate-500 text-center py-8">No private viewer selfies captured yet.</div>
       </div>
@@ -95,12 +95,12 @@
       <button onclick="closeAndDestroyViewer('Manual Exit')" class="bg-red-600/80 hover:bg-red-600 text-white text-xs px-3 py-1.5 rounded-md">Exit</button>
     </div>
 
-    <!-- Canvas Photo Container (Target for 2-finger press and hold) -->
+    <!-- Canvas Photo Container -->
     <div id="touch-hold-zone" class="relative flex-1 flex items-center justify-center my-4 overflow-hidden rounded-xl border border-dashed border-cyan-500/50 bg-slate-950 select-none">
       <div id="hold-instruction" class="text-center p-6 space-y-2">
-        <div class="text-3xl">✌️</div>
+        <div class="text-3xl">✌️️</div>
         <div class="text-xs font-bold text-cyan-400">Press & Hold with 2 Fingers</div>
-        <div class="text-[10px] text-slate-400">Photo reveals for 1.3 seconds max. Front camera will snap you!</div>
+        <div class="text-[10px] text-slate-400">Photo reveals for 1.3 seconds max. Front camera snaps your reaction!</div>
       </div>
       <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden"></canvas>
       <video id="webcam-feed" autoplay playsinline muted class="hidden"></video>
@@ -111,7 +111,7 @@
       <div id="timer-bar-container" class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden hidden">
         <div id="timer-bar" class="bg-cyan-400 h-full w-full transition-all duration-[1300ms] linear"></div>
       </div>
-      <p class="text-[10px] text-slate-500">🔒 Lifting fingers or leaving screen destroys the photo instantly.</p>
+      <p class="text-[10px] text-slate-500">🔒 Photo self-destructs instantly after viewing or lifting fingers.</p>
     </div>
   </div>
 
@@ -119,7 +119,7 @@
   <div id="send-modal" class="fixed inset-0 bg-slate-950/90 flex items-center justify-center p-4 z-50 hidden">
     <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm space-y-4">
       <h3 class="text-sm font-bold text-white">Broadcast Photo to Group</h3>
-      <p class="text-xs text-slate-400">Requires 2-finger hold for 1.3 seconds to view. Front camera snaps viewer automatically.</p>
+      <p class="text-xs text-slate-400">Requires 2-finger hold for 1.3 seconds to view. Self-destructs completely upon viewing.</p>
       <input type="file" id="photo-input" accept="image/*" capture="environment" class="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-cyan-900/50 file:text-cyan-300 hover:file:bg-cyan-900">
       <div class="flex gap-2">
         <button onclick="closeSendModal()" class="flex-1 bg-slate-800 text-slate-300 text-xs py-2.5 rounded-lg">Cancel</button>
@@ -131,7 +131,7 @@
   <!-- Firebase Integration Script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, query, where, orderBy, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
@@ -201,30 +201,23 @@
 
         snapshot.forEach((docSnap) => {
           const msg = docSnap.data();
-          const viewedByList = msg.viewedBy || [];
-          const hasViewed = viewedByList.includes(currentUser.id);
-
+          // Hide photos sent by current user from their own feed to keep it clean, or show them depending on preference
           list.innerHTML += `
-            <div class="p-3 bg-slate-900 border ${hasViewed ? 'border-slate-800 opacity-60' : 'border-cyan-500/40'} rounded-xl flex items-center justify-between">
+            <div class="p-3 bg-slate-900 border border-cyan-500/40 rounded-xl flex items-center justify-between">
               <div>
                 <div class="text-xs font-semibold text-slate-200">From: ${msg.senderName}</div>
-                <div class="text-[10px] ${hasViewed ? 'text-slate-500' : 'text-cyan-400'}">
-                  ${hasViewed ? '✓ Already Viewed (Self-Destructed)' : '🔒 1 Unopened Group Photo'}
-                </div>
+                <div class="text-[10px] text-cyan-400">🔒 1 Unopened Group Photo</div>
               </div>
-              ${!hasViewed ? `
-                <button onclick="openPhotoViewer('${docSnap.id}', '${msg.imageData}', '${msg.senderId}', '${msg.senderName}')" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium">View Photo</button>
-              ` : `
-                <span class="text-[10px] font-mono text-slate-500">EXPIRED</span>
-              `}
+              <button onclick="openPhotoViewer('${docSnap.id}', '${msg.imageData}', '${msg.senderId}', '${msg.senderName}')" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium">View Photo</button>
             </div>
           `;
         });
       });
     }
 
-    // Privately Listen ONLY to Reaction Selfies
+    // PRIVATELY Listen ONLY to Reaction Selfies where senderId == currentUser.id
     function listenToPrivateReactions() {
+      if (!currentUser) return;
       const q = query(
         collection(db, "reactions"), 
         where("senderId", "==", currentUser.id),
@@ -247,7 +240,7 @@
               <img src="${data.reactionImage}" class="w-full h-32 object-cover rounded-lg border border-slate-800">
               <div class="text-[11px] font-bold text-slate-200">${data.viewerName}</div>
               <div class="text-[9px] ${data.isViolation ? 'text-red-400 font-bold' : 'text-cyan-400'}">
-                ${data.isViolation ? '🚨 Captured during screenshot attempt!' : 'Viewed via 2-finger hold'}
+                ${data.isViolation ? '🚨 Captured during violation attempt!' : 'Viewed your broadcast'}
               </div>
             </div>
           `;
@@ -295,7 +288,6 @@
           senderId: currentUser.id,
           senderName: currentUser.name,
           imageData: e.target.result,
-          viewedBy: [],
           createdAt: serverTimestamp()
         });
         closeSendModal();
@@ -323,12 +315,10 @@
       document.getElementById('viewer-modal').classList.remove('hidden');
       document.getElementById('viewer-modal').classList.add('flex');
       
-      // Reset UI state
       document.getElementById('hold-instruction').classList.remove('hidden');
       document.getElementById('photo-canvas').classList.add('hidden');
       document.getElementById('timer-bar-container').classList.add('hidden');
 
-      // Start Camera Stream ready for reaction snap
       try {
         cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" } });
         const video = document.getElementById('webcam-feed');
@@ -338,178 +328,21 @@
         console.warn("Camera access denied or unequipped.");
       }
 
-      // Attach Touch Event Listeners for 2-Finger Hold
       const zone = document.getElementById('touch-hold-zone');
       zone.addEventListener('touchstart', handleTouchStart, { passive: false });
       zone.addEventListener('touchend', handleTouchEnd);
       zone.addEventListener('touchcancel', handleTouchEnd);
 
-      // Desktop fallback mouse emulation option (optional for testing on PC)
       zone.addEventListener('mousedown', handleMouseDown);
       zone.addEventListener('mouseup', handleMouseUp);
     };
 
-    // HANDLE 2-FINGER TOUCH START
     async function handleTouchStart(e) {
       e.preventDefault();
       if (isHolding || !currentActiveMessage) return;
 
-      // Check if EXACTLY 2 fingers are touching
       if (e.touches.length === 2) {
         isHolding = true;
         await revealPhotoAndSnap();
       } else if (e.touches.length > 2) {
-        triggerSecurityViolation('Too many fingers or unauthorized capture gesture.');
-      }
-    }
-
-    function handleTouchEnd(e) {
-      if (isHolding) {
-        // If fingers lifted before 1.3s, stop viewing immediately
-        stopViewingAndDestroy();
-      }
-    }
-
-    // Desktop Mouse Fallback (Emulates 2 fingers with Shift + Click)
-    async function handleMouseDown(e) {
-      if (isHolding || !currentActiveMessage) return;
-      if (e.shiftKey) {
-        isHolding = true;
-        await revealPhotoAndSnap();
-      }
-    }
-
-    function handleMouseUp(e) {
-      if (isHolding) {
-        stopViewingAndDestroy();
-      }
-    }
-
-    // REVEAL PHOTO, START 1.3s TIMER, & SNAP SELFIE
-    async function revealPhotoAndSnap() {
-      const { id, senderId, senderName } = currentActiveMessage;
-
-      // 1. Capture Private Reaction Selfie Instantly
-      const reactionSnap = takeCameraFrame();
-      if (reactionSnap) {
-        try {
-          await addDoc(collection(db, "reactions"), {
-            senderId: senderId,
-            senderName: senderName,
-            viewerName: currentUser.name,
-            reactionImage: reactionSnap,
-            isViolation: false,
-            createdAt: serverTimestamp()
-          });
-        } catch(e){}
-      }
-
-      // 2. Render Photo on Canvas with Watermark
-      const canvas = document.getElementById('photo-canvas');
-      const ctx = canvas.getContext('2d');
-      const img = new Image();
-      img.src = storedImageData;
-      img.onload = () => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-
-        ctx.font = "bold 24px monospace";
-        ctx.fillStyle = "rgba(239, 68, 68, 0.45)";
-        ctx.rotate(-0.2);
-        for (let i = 0; i < canvas.height; i += 150) {
-          ctx.fillText(`PROTECTED | ${currentUser.name} | 1.3s VIEW`, 50, i);
-        }
-      };
-
-      // Switch UI to show photo & timer
-      document.getElementById('hold-instruction').classList.add('hidden');
-      canvas.classList.remove('hidden');
-      
-      const timerContainer = document.getElementById('timer-bar-container');
-      const timerBar = document.getElementById('timer-bar');
-      timerContainer.classList.remove('hidden');
-      timerBar.style.width = '100%';
-      setTimeout(() => { timerBar.style.width = '0%'; }, 50);
-
-      // 3. Mark photo as viewed in Firestore (Self-destruct token)
-      try {
-        await updateDoc(doc(db, "group_messages", id), {
-          viewedBy: arrayUnion(currentUser.id)
-        });
-      } catch(e){}
-
-      // 4. Set strict 1.3 second auto-destruction timer
-      viewTimer = setTimeout(() => {
-        stopViewingAndDestroy('Photo expired after 1.3 seconds.');
-      }, 1300);
-    }
-
-    // STOP VIEWING & DESTROY PHOTO
-    function stopViewingAndDestroy(reason) {
-      if (viewTimer) clearTimeout(viewTimer);
-      viewTimer = null;
-      isHolding = false;
-
-      const canvas = document.getElementById('photo-canvas');
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      closeAndDestroyViewer(reason);
-    }
-
-    async function triggerSecurityViolation(msg) {
-      if (!currentActiveMessage) return;
-      const { senderId, senderName } = currentActiveMessage;
-      
-      const violationSnap = takeCameraFrame();
-      try {
-        await addDoc(collection(db, "violations"), {
-          offenderId: currentUser.id,
-          offenderName: currentUser.name,
-          senderName: senderName,
-          flaggedAt: serverTimestamp()
-        });
-
-        if (violationSnap) {
-          await addDoc(collection(db, "reactions"), {
-            senderId: senderId,
-            senderName: senderName,
-            viewerName: currentUser.name,
-            reactionImage: violationSnap,
-            isViolation: true,
-            createdAt: serverTimestamp()
-          });
-        }
-      } catch(e){}
-
-      stopViewingAndDestroy(msg || '🚨 Security violation detected.');
-    }
-
-    window.closeAndDestroyViewer = (reason) => {
-      if (viewTimer) clearTimeout(viewTimer);
-      viewTimer = null;
-      isHolding = false;
-
-      const zone = document.getElementById('touch-hold-zone');
-      zone.removeEventListener('touchstart', handleTouchStart);
-      zone.removeEventListener('touchend', handleTouchEnd);
-      zone.removeEventListener('touchcancel', handleTouchEnd);
-      zone.removeEventListener('mousedown', handleMouseDown);
-      zone.removeEventListener('mouseup', handleMouseUp);
-
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-      }
-
-      currentActiveMessage = null;
-      storedImageData = null;
-      document.getElementById('viewer-modal').classList.add('hidden');
-      document.getElementById('viewer-modal').classList.remove('flex');
-    };
-
-    if (currentUser) initApp();
-  </script>
-</body>
-</html>
+        triggerSecurityViolation('Too many fingers
