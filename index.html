@@ -1,174 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>PeekLens — Ephemeral Photo Broadcast</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col justify-between select-none">
-
-  <!-- Header -->
-  <header class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 backdrop-blur sticky top-0 z-10">
-    <div>
-      <h1 class="font-extrabold text-cyan-400 text-lg tracking-wider">PEEKLENS</h1>
-      <p id="user-display" class="text-xs text-slate-400">Not Logged In</p>
-    </div>
-    <div class="flex gap-2">
-      <button onclick="openSendModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
-        + Post Photo
-      </button>
-
-      <button onclick="openAdminModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition">
-        Admin
-      </button>
-    </div>
-  </header>
-
-  <!-- Hidden Camera Element for Reaction Capture -->
-  <video id="webcam-feed" class="hidden" autoplay playsinline muted></video>
-
-  <!-- Main Feed Area -->
-  <main class="flex-1 p-4 max-w-md w-full mx-auto space-y-4">
-    <!-- Navigation Tabs -->
-    <div class="flex border-b border-slate-800">
-      <button id="tab-feed" onclick="switchTab('feed')" class="flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm">
-        Group Feed
-      </button>
-
-      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">
-        Viewer Reactions
-      </button>
-
-      <button id="tab-logs" onclick="switchTab('logs')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">
-        Audit Logs
-      </button>
-    </div>
-
-    <!-- Feed View -->
-    <div id="view-feed" class="space-y-3">
-      <div id="group-feed-list" class="space-y-3">
-        <div class="text-xs text-slate-500 text-center py-8">Loading group photos...</div>
-      </div>
-    </div>
-
-    <!-- Reactions View -->
-    <div id="view-reactions" class="hidden space-y-3">
-      <p class="text-xs text-slate-400">Private viewer photos captured when others held to view your broadcasts:</p>
-      <div id="reactions-list" class="grid grid-cols-2 gap-2">
-        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No reactions captured yet.</div>
-      </div>
-    </div>
-
-    <!-- Security Logs View -->
-    <div id="view-logs" class="hidden space-y-3">
-      <p class="text-xs text-slate-400">System security and violation events:</p>
-      <div id="logs-list" class="space-y-2">
-        <div class="text-xs text-slate-500 text-center py-8">No security flags reported.</div>
-      </div>
-    </div>
-  </main>
-
-  <!-- Viewer Overlay Modal -->
-  <div id="viewer-modal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between p-4 touch-none">
-    <div class="flex justify-between items-center text-xs text-slate-400">
-      <span class="font-mono text-cyan-400">PROTECTED EPHEMERAL VIEWER</span>
-      <button onclick="closeAndDestroyViewer('User closed modal manually')" class="bg-red-950 text-red-400 px-3 py-1 rounded border border-red-800">
-        Close
-      </button>
-    </div>
-
-    <!-- Interactive Hold Zone -->
-    <div id="touch-hold-zone" class="flex-1 my-4 border-2 border-dashed border-cyan-500/30 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden bg-slate-950/50">
-      <div id="hold-instruction" class="text-center space-y-2 p-6">
-        <div class="text-4xl">✌️</div>
-        <div class="font-bold text-slate-200">HOLD WITH TWO FINGERS</div>
-        <p class="text-xs text-slate-400 max-w-xs">
-          Press and hold anywhere inside this area using <span class="text-cyan-400 font-bold">2 fingers simultaneously</span>.
-          Releasing or taking screenshots will trigger an incident alert.
-        </p>
-        <p class="text-[10px] text-slate-500 italic mt-2">(On desktop testing, press Shift + Click to simulate)</p>
-      </div>
-
-      <!-- Canvas for Rendered Image -->
-      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden rounded-lg shadow-2xl"></canvas>
-
-      <!-- Visual Timer Bar -->
-      <div id="timer-bar-container" class="absolute bottom-0 left-0 right-0 h-1.5 bg-slate-800 hidden">
-        <div id="timer-bar" class="h-full bg-cyan-400 transition-all duration-[1300ms] linear w-full"></div>
-      </div>
-    </div>
-
-    <div class="text-center text-[11px] text-slate-500">
-      Selfie camera active • Frame logged to sender on view
-    </div>
-  </div>
-
-  <!-- Send Photo Modal -->
-  <div id="send-modal" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4">
-      <div class="flex justify-between items-center">
-        <h3 class="font-bold text-sm text-slate-200">Broadcast Group Photo</h3>
-        <button onclick="closeSendModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
-      </div>
-      <input type="file" id="photo-input" accept="image/*" class="text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-500 w-full" />
-      <button onclick="submitGroupPhoto()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg text-xs font-semibold">
-        Publish Broadcast
-      </button>
-    </div>
-  </div>
-
-  <!-- Admin Modal -->
-  <div id="admin-modal" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4">
-      <div class="flex justify-between items-center">
-        <h3 class="font-bold text-sm text-slate-200">Admin Member Control</h3>
-        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
-      </div>
-
-      <div id="admin-login-view" class="space-y-3">
-        <input type="password" id="admin-password-input" placeholder="Enter Admin Password" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
-        <button onclick="handleAdminLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg text-xs font-semibold">
-          Unlock Dashboard
-        </button>
-      </div>
-
-      <div id="admin-dashboard-view" class="hidden space-y-4">
-        <div class="flex gap-2">
-          <input type="text" id="new-member-input" placeholder="Authorized User Name" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
-          <button onclick="addApprovedMember()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 rounded-lg text-xs font-semibold">
-            Authorize
-          </button>
-        </div>
-
-        <div class="space-y-1">
-          <label class="text-[10px] font-bold text-slate-400 uppercase">Authorized Members</label>
-          <div id="approved-members-list" class="max-h-40 overflow-y-auto space-y-1.5 border border-slate-800 p-2 rounded-lg bg-slate-950">
-            <!-- Dynamic members injected here -->
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <!-- Login Modal -->
-  <div id="login-modal" class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
-    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 space-y-4 text-center">
-      <h2 class="font-black text-cyan-400 text-xl tracking-wider">PEEKLENS</h2>
-      <p class="text-xs text-slate-400">Enter your authorized full name to log in.</p>
-      <input type="text" id="username-input" placeholder="Your Authorized Name" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
-      <button onclick="handleLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2.5 rounded-lg text-xs font-semibold">
-        Authenticate
-      </button>
-    </div>
-  </div>
-
-  <!-- Firebase Script Integration -->
+<!-- Firebase Integration Script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { 
-      getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp, getDocs, getDoc 
-    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
@@ -182,24 +15,20 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const ADMIN_SECRET = "admin123";
+    const ADMIN_SECRET = "admin123"; 
     let currentUser = JSON.parse(localStorage.getItem('peeklens_user') || 'null');
     let currentActiveMessage = null;
     let cameraStream = null;
     let viewTimer = null;
     let isHolding = false;
     let storedImageData = null;
-    let groupMessagesMap = {};
-    let viewerActive = false; // FIX: track whether the viewer modal is actually open,
-                               // so a stray timer firing after close can no-op instead
-                               // of re-triggering destroy logic on dead state.
+    let groupMessagesMap = {}; 
 
     if (currentUser) {
       document.getElementById('login-modal').classList.add('hidden');
       initApp();
     }
 
-    // Attach modules globally for inline listeners
     window.handleLogin = async () => {
       const nameInput = document.getElementById('username-input').value.trim();
       if (!nameInput) return alert('Please enter your name');
@@ -229,9 +58,7 @@
     };
 
     window.handleAdminLogin = () => {
-      // FIX: trim the password input — a trailing space/newline from mobile
-      // autocomplete previously caused a silent, confusing login failure.
-      const pass = document.getElementById('admin-password-input').value.trim();
+      const pass = document.getElementById('admin-password-input').value;
       if (pass !== ADMIN_SECRET) {
         return alert('Incorrect Admin Password');
       }
@@ -302,7 +129,7 @@
       onSnapshot(q, (snapshot) => {
         const list = document.getElementById('group-feed-list');
         list.innerHTML = '';
-        groupMessagesMap = {};
+        groupMessagesMap = {}; 
 
         if (snapshot.empty) {
           list.innerHTML = '<div class="text-xs text-slate-500 text-center py-8">No active group photos right now</div>';
@@ -311,7 +138,7 @@
 
         snapshot.forEach((docSnap) => {
           const msg = docSnap.data();
-          groupMessagesMap[docSnap.id] = msg;
+          groupMessagesMap[docSnap.id] = msg; 
 
           list.innerHTML += `
             <div class="p-3 bg-slate-900 border border-cyan-500/40 rounded-xl flex items-center justify-between">
@@ -345,8 +172,8 @@
         });
         
         reactions.sort((a, b) => {
-          let timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : Date.now();
-          let timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : Date.now();
+          let timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+          let timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
           return timeB - timeA;
         });
 
@@ -394,7 +221,6 @@
     window.submitGroupPhoto = async () => {
       if (!currentUser) return alert('Please log in.');
 
-      // Check if user is still authorized
       try {
         const memberCheck = await getDoc(doc(db, "users", currentUser.id));
         if (!memberCheck.exists()) {
@@ -411,66 +237,30 @@
       const file = fileInput.files[0];
       if (!file) return alert('Select an image');
 
-      // FIX: validate the file before upload. Previously any file type was
-      // accepted and silently attempted, and large images would blow past
-      // Firestore's ~1MB document size limit with no explanation to the user.
-      if (!file.type.startsWith('image/')) {
-        return alert('Please select an image file.');
-      }
-      if (file.size > 700 * 1024) {
-        return alert('That image is too large to broadcast (max ~700KB as a data URL). Please choose a smaller photo.');
-      }
-
       const reader = new FileReader();
       reader.onload = async (e) => {
-        try {
-          await addDoc(collection(db, "messages"), {
-            senderId: currentUser.id,
-            senderName: currentUser.name,
-            imageData: e.target.result,
-            createdAt: serverTimestamp()
-          });
-          closeSendModal();
-          fileInput.value = '';
-          alert('Photo broadcasted successfully to the group feed!');
-        } catch (err) {
-          console.error("Broadcast failed:", err);
-          alert('Broadcast failed: ' + (err.message || 'unknown error'));
-        }
+        await addDoc(collection(db, "messages"), {
+          senderId: currentUser.id,
+          senderName: currentUser.name,
+          imageData: e.target.result,
+          createdAt: serverTimestamp()
+        });
+        closeSendModal();
+        fileInput.value = '';
+        alert('Photo broadcasted successfully to the group feed!');
       };
       reader.readAsDataURL(file);
     };
 
-    // FIX: wait for the camera to actually have a usable frame before
-    // snapping. Previously this read whatever frame happened to be in the
-    // <video> element the instant getUserMedia resolved, which was often
-    // still black (readyState 0) on the very first reaction capture.
     function takeCameraFrame() {
       const video = document.getElementById('webcam-feed');
       if (!video || !cameraStream) return null;
-      if (video.readyState < 2 || video.videoWidth === 0) return null;
       const reactionCanvas = document.createElement('canvas');
       reactionCanvas.width = 320;
       reactionCanvas.height = 240;
       const ctx = reactionCanvas.getContext('2d');
       ctx.drawImage(video, 0, 0, reactionCanvas.width, reactionCanvas.height);
       return reactionCanvas.toDataURL('image/jpeg', 0.6);
-    }
-
-    // FIX: small helper so the camera frame is captured once it's actually
-    // ready, instead of possibly grabbing a black frame right after
-    // getUserMedia resolves but before the first frame has decoded.
-    function waitForCameraReady(maxWaitMs = 600) {
-      return new Promise((resolve) => {
-        const video = document.getElementById('webcam-feed');
-        const start = Date.now();
-        (function check() {
-          if (!cameraStream) return resolve();
-          if (video.readyState >= 2 && video.videoWidth > 0) return resolve();
-          if (Date.now() - start > maxWaitMs) return resolve();
-          requestAnimationFrame(check);
-        })();
-      });
     }
 
     window.openPhotoViewer = async (msgId) => {
@@ -482,7 +272,6 @@
 
       currentActiveMessage = { id: msgId, senderId: msg.senderId, senderName: msg.senderName };
       storedImageData = msg.imageData;
-      viewerActive = true;
       
       document.getElementById('viewer-modal').classList.remove('hidden');
       document.getElementById('viewer-modal').classList.add('flex');
@@ -496,14 +285,13 @@
         const video = document.getElementById('webcam-feed');
         video.srcObject = cameraStream;
         await video.play();
-        await waitForCameraReady();
       } catch (err) {
         console.warn("Camera access denied or unequipped.");
       }
 
       const zone = document.getElementById('touch-hold-zone');
-      const freshZone = zone.cloneNode(true);
-      zone.parentNode.replaceChild(freshZone, zone);
+      zone.replaceWith(zone.cloneNode(true));
+      const freshZone = document.getElementById('touch-hold-zone');
 
       freshZone.addEventListener('touchstart', handleTouchStart, { passive: false });
       freshZone.addEventListener('touchend', handleTouchEnd);
@@ -517,7 +305,6 @@
       e.preventDefault();
       if (isHolding || !currentActiveMessage) return;
 
-      // TWO-FINGER HOLD REQUIREMENT
       if (e.touches.length === 2) {
         isHolding = true;
         await revealPhotoAndSnap();
@@ -534,7 +321,7 @@
 
     async function handleMouseDown(e) {
       if (isHolding || !currentActiveMessage) return;
-      if (e.shiftKey) { // Desktop testing simulation
+      if (e.shiftKey) {
         isHolding = true;
         await revealPhotoAndSnap();
       }
@@ -549,7 +336,7 @@
     async function revealPhotoAndSnap() {
       const { id, senderId, senderName } = currentActiveMessage;
 
-      // 1. Silent reaction snap sent to original sender
+      // Capture viewer reaction snapshot and send privately to sender
       const reactionSnap = takeCameraFrame();
       if (reactionSnap) {
         try {
@@ -564,28 +351,15 @@
         } catch(e){}
       }
 
-      // 2. Render image with watermark onto canvas
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
       const img = new Image();
-      // FIX: attach onload BEFORE setting src. Previously src was set first,
-      // so a cached image could finish loading (and fire 'load') before the
-      // handler was attached, meaning the photo/watermark silently never
-      // rendered onto the canvas.
+      img.src = storedImageData;
       img.onload = () => {
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
-
-        // Watermark protection layer
-        ctx.font = "bold 24px monospace";
-        ctx.fillStyle = "rgba(239, 68, 68, 0.45)";
-        ctx.rotate(-0.2);
-        for (let i = 0; i < canvas.height; i += 150) {
-          ctx.fillText(`PROTECTED | ${currentUser.name} | 1.3s VIEW`, 50, i);
-        }
       };
-      img.src = storedImageData;
 
       document.getElementById('hold-instruction').classList.add('hidden');
       canvas.classList.remove('hidden');
@@ -596,33 +370,25 @@
       timerBar.style.width = '100%';
       setTimeout(() => { timerBar.style.width = '0%'; }, 50);
 
-      // 3. Immediately delete document so it cannot be viewed again
+      // Delete the message immediately so it's a true 1-view photo
       try {
         await deleteDoc(doc(db, "messages", id));
       } catch(e){}
 
-      // 4. Set 1.3 second timer limit
+      // 1.3 second auto-expiration timer
       viewTimer = setTimeout(() => {
         stopViewingAndDestroy('Photo expired after 1.3 seconds.');
       }, 1300);
     }
 
     function stopViewingAndDestroy(reason) {
-      // FIX: guard against a stale viewTimer firing after the viewer was
-      // already closed (e.g. user tapped Close right as the 1.3s timer was
-      // about to fire) — previously this could re-run teardown logic on
-      // already-cleared state.
-      if (!viewerActive) return;
-
       if (viewTimer) clearTimeout(viewTimer);
       viewTimer = null;
       isHolding = false;
 
       const canvas = document.getElementById('photo-canvas');
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-      }
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
 
       closeAndDestroyViewer(reason);
     }
@@ -656,19 +422,16 @@
     }
 
     window.closeAndDestroyViewer = (reason) => {
-      viewerActive = false;
       if (viewTimer) clearTimeout(viewTimer);
       viewTimer = null;
       isHolding = false;
 
       const zone = document.getElementById('touch-hold-zone');
-      if (zone) {
-        zone.removeEventListener('touchstart', handleTouchStart);
-        zone.removeEventListener('touchend', handleTouchEnd);
-        zone.removeEventListener('touchcancel', handleTouchEnd);
-        zone.removeEventListener('mousedown', handleMouseDown);
-        zone.removeEventListener('mouseup', handleMouseUp);
-      }
+      zone.removeEventListener('touchstart', handleTouchStart);
+      zone.removeEventListener('touchend', handleTouchEnd);
+      zone.removeEventListener('touchcancel', handleTouchEnd);
+      zone.removeEventListener('mousedown', handleMouseDown);
+      zone.removeEventListener('mouseup', handleMouseUp);
 
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -681,5 +444,3 @@
       document.getElementById('viewer-modal').classList.remove('flex');
     };
   </script>
-</body>
-</html>
