@@ -1,7 +1,174 @@
-<!-- Firebase Integration Script -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>PeekLens — Ephemeral Photo Broadcast</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen font-sans flex flex-col justify-between select-none">
+
+  <!-- Header -->
+  <header class="p-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80 backdrop-blur sticky top-0 z-10">
+    <div>
+      <h1 class="font-extrabold text-cyan-400 text-lg tracking-wider">PEEKLENS</h1>
+      <p id="user-display" class="text-xs text-slate-400">Not Logged In</p>
+    </div>
+    <div class="flex gap-2">
+      <button onclick="openSendModal()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition">
+        + Post Photo
+      </button>
+
+      <button onclick="openAdminModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 px-3 py-1.5 rounded-lg text-xs font-medium transition">
+        Admin
+      </button>
+    </div>
+  </header>
+
+  <!-- Hidden Camera Element for Reaction Capture -->
+  <video id="webcam-feed" class="hidden" autoplay playsinline muted></video>
+
+  <!-- Main Feed Area -->
+  <main class="flex-1 p-4 max-w-md w-full mx-auto space-y-4">
+    <!-- Navigation Tabs -->
+    <div class="flex border-b border-slate-800">
+      <button id="tab-feed" onclick="switchTab('feed')" class="flex-1 py-2 font-semibold text-cyan-400 border-b-2 border-cyan-400 text-sm">
+        Group Feed
+      </button>
+
+      <button id="tab-reactions" onclick="switchTab('reactions')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">
+        Viewer Reactions
+      </button>
+
+      <button id="tab-logs" onclick="switchTab('logs')" class="flex-1 py-2 font-semibold text-slate-400 border-b-2 border-transparent text-sm">
+        Audit Logs
+      </button>
+    </div>
+
+    <!-- Feed View -->
+    <div id="view-feed" class="space-y-3">
+      <div id="group-feed-list" class="space-y-3">
+        <div class="text-xs text-slate-500 text-center py-8">Loading group photos...</div>
+      </div>
+    </div>
+
+    <!-- Reactions View -->
+    <div id="view-reactions" class="hidden space-y-3">
+      <p class="text-xs text-slate-400">Private viewer photos captured when others held to view your broadcasts:</p>
+      <div id="reactions-list" class="grid grid-cols-2 gap-2">
+        <div class="col-span-2 text-xs text-slate-500 text-center py-8">No reactions captured yet.</div>
+      </div>
+    </div>
+
+    <!-- Security Logs View -->
+    <div id="view-logs" class="hidden space-y-3">
+      <p class="text-xs text-slate-400">System security and violation events:</p>
+      <div id="logs-list" class="space-y-2">
+        <div class="text-xs text-slate-500 text-center py-8">No security flags reported.</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Viewer Overlay Modal -->
+  <div id="viewer-modal" class="fixed inset-0 bg-black/95 z-50 hidden flex-col justify-between p-4 touch-none">
+    <div class="flex justify-between items-center text-xs text-slate-400">
+      <span class="font-mono text-cyan-400">PROTECTED EPHEMERAL VIEWER</span>
+      <button onclick="closeAndDestroyViewer('User closed modal manually')" class="bg-red-950 text-red-400 px-3 py-1 rounded border border-red-800">
+        Close
+      </button>
+    </div>
+
+    <!-- Interactive Hold Zone -->
+    <div id="touch-hold-zone" class="flex-1 my-4 border-2 border-dashed border-cyan-500/30 rounded-2xl flex flex-col items-center justify-center relative overflow-hidden bg-slate-950/50">
+      <div id="hold-instruction" class="text-center space-y-2 p-6">
+        <div class="text-4xl">✌️</div>
+        <div class="font-bold text-slate-200">HOLD WITH TWO FINGERS</div>
+        <p class="text-xs text-slate-400 max-w-xs">
+          Press and hold anywhere inside this area using <span class="text-cyan-400 font-bold">2 fingers simultaneously</span>.
+          Releasing or taking screenshots will trigger an incident alert.
+        </p>
+        <p class="text-[10px] text-slate-500 italic mt-2">(On desktop testing, press Shift + Click to simulate)</p>
+      </div>
+
+      <!-- Canvas for Rendered Image -->
+      <canvas id="photo-canvas" class="max-w-full max-h-full object-contain hidden rounded-lg shadow-2xl"></canvas>
+
+      <!-- Visual Timer Bar -->
+      <div id="timer-bar-container" class="absolute bottom-0 left-0 right-0 h-1.5 bg-slate-800 hidden">
+        <div id="timer-bar" class="h-full bg-cyan-400 transition-all duration-[1300ms] linear w-full"></div>
+      </div>
+    </div>
+
+    <div class="text-center text-[11px] text-slate-500">
+      Selfie camera active • Frame logged to sender on view
+    </div>
+  </div>
+
+  <!-- Send Photo Modal -->
+  <div id="send-modal" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-sm text-slate-200">Broadcast Group Photo</h3>
+        <button onclick="closeSendModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+      <input type="file" id="photo-input" accept="image/*" class="text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-cyan-600 file:text-white hover:file:bg-cyan-500 w-full" />
+      <button onclick="submitGroupPhoto()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg text-xs font-semibold">
+        Publish Broadcast
+      </button>
+    </div>
+  </div>
+
+  <!-- Admin Modal -->
+  <div id="admin-modal" class="fixed inset-0 bg-black/80 z-40 hidden flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 space-y-4">
+      <div class="flex justify-between items-center">
+        <h3 class="font-bold text-sm text-slate-200">Admin Member Control</h3>
+        <button onclick="closeAdminModal()" class="text-slate-400 hover:text-white text-xs">✕</button>
+      </div>
+
+      <div id="admin-login-view" class="space-y-3">
+        <input type="password" id="admin-password-input" placeholder="Enter Admin Password" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+        <button onclick="handleAdminLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2 rounded-lg text-xs font-semibold">
+          Unlock Dashboard
+        </button>
+      </div>
+
+      <div id="admin-dashboard-view" class="hidden space-y-4">
+        <div class="flex gap-2">
+          <input type="text" id="new-member-input" placeholder="Authorized User Name" class="flex-1 bg-slate-950 border border-slate-800 rounded-lg p-2 text-xs text-slate-200">
+          <button onclick="addApprovedMember()" class="bg-cyan-600 hover:bg-cyan-500 text-white px-3 rounded-lg text-xs font-semibold">
+            Authorize
+          </button>
+        </div>
+
+        <div class="space-y-1">
+          <label class="text-[10px] font-bold text-slate-400 uppercase">Authorized Members</label>
+          <div id="approved-members-list" class="max-h-40 overflow-y-auto space-y-1.5 border border-slate-800 p-2 rounded-lg bg-slate-950">
+            <!-- Dynamic members injected here -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Login Modal -->
+  <div id="login-modal" class="fixed inset-0 bg-black/90 z-50 flex items-center justify-center p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 space-y-4 text-center">
+      <h2 class="font-black text-cyan-400 text-xl tracking-wider">PEEKLENS</h2>
+      <p class="text-xs text-slate-400">Enter your authorized full name to log in.</p>
+      <input type="text" id="username-input" placeholder="Your Authorized Name" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-3 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+      <button onclick="handleLogin()" class="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-2.5 rounded-lg text-xs font-semibold">
+        Authenticate
+      </button>
+    </div>
+  </div>
+
+  <!-- Firebase Script Integration -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp, getDocs, getDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { 
+      getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp, getDocs, getDoc 
+    } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
@@ -15,20 +182,21 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const ADMIN_SECRET = "admin123"; 
+    const ADMIN_SECRET = "admin123";
     let currentUser = JSON.parse(localStorage.getItem('peeklens_user') || 'null');
     let currentActiveMessage = null;
     let cameraStream = null;
     let viewTimer = null;
     let isHolding = false;
     let storedImageData = null;
-    let groupMessagesMap = {}; 
+    let groupMessagesMap = {};
 
     if (currentUser) {
       document.getElementById('login-modal').classList.add('hidden');
       initApp();
     }
 
+    // Attach modules globally for inline listeners
     window.handleLogin = async () => {
       const nameInput = document.getElementById('username-input').value.trim();
       if (!nameInput) return alert('Please enter your name');
@@ -129,7 +297,7 @@
       onSnapshot(q, (snapshot) => {
         const list = document.getElementById('group-feed-list');
         list.innerHTML = '';
-        groupMessagesMap = {}; 
+        groupMessagesMap = {};
 
         if (snapshot.empty) {
           list.innerHTML = '<div class="text-xs text-slate-500 text-center py-8">No active group photos right now</div>';
@@ -138,7 +306,7 @@
 
         snapshot.forEach((docSnap) => {
           const msg = docSnap.data();
-          groupMessagesMap[docSnap.id] = msg; 
+          groupMessagesMap[docSnap.id] = msg;
 
           list.innerHTML += `
             <div class="p-3 bg-slate-900 border border-cyan-500/40 rounded-xl flex items-center justify-between">
@@ -172,8 +340,8 @@
         });
         
         reactions.sort((a, b) => {
-          let timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-          let timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+          let timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : Date.now();
+          let timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : Date.now();
           return timeB - timeA;
         });
 
@@ -221,7 +389,7 @@
     window.submitGroupPhoto = async () => {
       if (!currentUser) return alert('Please log in.');
 
-      // Check if user still exists in the 'users' collection
+      // Check if user is still authorized
       try {
         const memberCheck = await getDoc(doc(db, "users", currentUser.id));
         if (!memberCheck.exists()) {
@@ -291,8 +459,8 @@
       }
 
       const zone = document.getElementById('touch-hold-zone');
-      zone.replaceWith(zone.cloneNode(true));
-      const freshZone = document.getElementById('touch-hold-zone');
+      const freshZone = zone.cloneNode(true);
+      zone.parentNode.replaceChild(freshZone, zone);
 
       freshZone.addEventListener('touchstart', handleTouchStart, { passive: false });
       freshZone.addEventListener('touchend', handleTouchEnd);
@@ -306,6 +474,7 @@
       e.preventDefault();
       if (isHolding || !currentActiveMessage) return;
 
+      // TWO-FINGER HOLD REQUIREMENT
       if (e.touches.length === 2) {
         isHolding = true;
         await revealPhotoAndSnap();
@@ -322,7 +491,7 @@
 
     async function handleMouseDown(e) {
       if (isHolding || !currentActiveMessage) return;
-      if (e.shiftKey) {
+      if (e.shiftKey) { // Desktop testing simulation
         isHolding = true;
         await revealPhotoAndSnap();
       }
@@ -337,6 +506,7 @@
     async function revealPhotoAndSnap() {
       const { id, senderId, senderName } = currentActiveMessage;
 
+      // 1. Silent reaction snap sent to original sender
       const reactionSnap = takeCameraFrame();
       if (reactionSnap) {
         try {
@@ -351,6 +521,7 @@
         } catch(e){}
       }
 
+      // 2. Render image with watermark onto canvas
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
       const img = new Image();
@@ -360,6 +531,7 @@
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
 
+        // Watermark protection layer
         ctx.font = "bold 24px monospace";
         ctx.fillStyle = "rgba(239, 68, 68, 0.45)";
         ctx.rotate(-0.2);
@@ -377,10 +549,12 @@
       timerBar.style.width = '100%';
       setTimeout(() => { timerBar.style.width = '0%'; }, 50);
 
+      // 3. Immediately delete document so it cannot be viewed again
       try {
         await deleteDoc(doc(db, "messages", id));
       } catch(e){}
 
+      // 4. Set 1.3 second timer limit
       viewTimer = setTimeout(() => {
         stopViewingAndDestroy('Photo expired after 1.3 seconds.');
       }, 1300);
@@ -392,8 +566,10 @@
       isHolding = false;
 
       const canvas = document.getElementById('photo-canvas');
-      const ctx = canvas.getContext('2d');
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+      }
 
       closeAndDestroyViewer(reason);
     }
@@ -432,11 +608,13 @@
       isHolding = false;
 
       const zone = document.getElementById('touch-hold-zone');
-      zone.removeEventListener('touchstart', handleTouchStart);
-      zone.removeEventListener('touchend', handleTouchEnd);
-      zone.removeEventListener('touchcancel', handleTouchEnd);
-      zone.removeEventListener('mousedown', handleMouseDown);
-      zone.removeEventListener('mouseup', handleMouseUp);
+      if (zone) {
+        zone.removeEventListener('touchstart', handleTouchStart);
+        zone.removeEventListener('touchend', handleTouchEnd);
+        zone.removeEventListener('touchcancel', handleTouchEnd);
+        zone.removeEventListener('mousedown', handleMouseDown);
+        zone.removeEventListener('mouseup', handleMouseUp);
+      }
 
       if (cameraStream) {
         cameraStream.getTracks().forEach(track => track.stop());
@@ -449,3 +627,5 @@
       document.getElementById('viewer-modal').classList.remove('flex');
     };
   </script>
+</body>
+</html>
