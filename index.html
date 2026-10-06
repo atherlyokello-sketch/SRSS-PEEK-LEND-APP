@@ -163,7 +163,7 @@
   <!-- Firebase Integration Script -->
   <script type="module">
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+    import { getFirestore, collection, addDoc, deleteDoc, onSnapshot, doc, query, where, orderBy, serverTimestamp, getDocs } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyCfLEGsSclyQBk2wkm9W3mDAcMMYpa0K4w",
@@ -177,13 +177,14 @@
     const app = initializeApp(firebaseConfig);
     const db = getFirestore(app);
 
-    const ADMIN_SECRET = "admin123"; // Change your admin password here if desired
+    const ADMIN_SECRET = "admin123";
     let currentUser = JSON.parse(localStorage.getItem('peeklens_user') || 'null');
     let currentActiveMessage = null;
     let cameraStream = null;
     let viewTimer = null;
     let isHolding = false;
     let storedImageData = null;
+    let memberStatusUnsub = null;
 
     // Check login state on startup
     if (currentUser) {
@@ -196,26 +197,19 @@
       const nameInput = document.getElementById('username-input').value.trim();
       if (!nameInput) return alert('Please enter your name');
 
-      // Check if user is pre-approved by admin
       const q = query(collection(db, "approved_members"), where("name", "==", nameInput));
-      onSnapshot(q, async (snapshot) => {
-        // Handled via verification or direct fetch query
-      }, {once: true});
+      const querySnapshot = await getDocs(q);
 
-      // Quick fetch check
-      import("https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js").then(async ({getDocs}) => {
-        const querySnapshot = await getDocs(q);
-        if (querySnapshot.empty) {
-          alert('Access Denied: Your name has not been authorized by an Admin yet.');
-          return;
-        }
+      if (querySnapshot.empty) {
+        alert('Access Denied: Your name has not been authorized by an Admin yet.');
+        return;
+      }
 
-        const memberDoc = querySnapshot.docs[0];
-        currentUser = { id: memberDoc.id, name: nameInput };
-        localStorage.setItem('peeklens_user', JSON.stringify(currentUser));
-        document.getElementById('login-modal').classList.add('hidden');
-        initApp();
-      });
+      const memberDoc = querySnapshot.docs[0];
+      currentUser = { id: memberDoc.id, name: nameInput };
+      localStorage.setItem('peeklens_user', JSON.stringify(currentUser));
+      document.getElementById('login-modal').classList.add('hidden');
+      initApp();
     };
 
     // Admin Panel Controls
@@ -278,10 +272,29 @@
       }
     };
 
+    function monitorCurrentMemberStatus() {
+      if (!currentUser) return;
+      if (memberStatusUnsub) memberStatusUnsub();
+
+      const q = query(collection(db, "approved_members"), where("name", "==", currentUser.name));
+      memberStatusUnsub = onSnapshot(q, (snapshot) => {
+        if (snapshot.empty) {
+          alert("Your access to PeekLens has been revoked by an Admin.");
+          localStorage.removeItem('peeklens_user');
+          currentUser = null;
+          document.getElementById('user-display').innerText = 'Not logged in';
+          document.getElementById('login-modal').classList.remove('hidden');
+          if (memberStatusUnsub) memberStatusUnsub();
+        }
+      });
+    }
+
     function initApp() {
       if (!currentUser) return;
       document.getElementById('user-display').innerText = `Member: ${currentUser.name}`;
       document.getElementById('login-modal').classList.add('hidden');
+      
+      monitorCurrentMemberStatus();
       listenToGroupFeed();
       listenToPrivateReactions();
       listenToViolations();
@@ -479,7 +492,7 @@
     }
 
     async function revealPhotoAndSnap() {
-      const { id, senderId, senderName } = currentActiveMessage;
+      const { senderId, senderName } = currentActiveMessage;
 
       const reactionSnap = takeCameraFrame();
       if (reactionSnap) {
@@ -521,19 +534,21 @@
       timerBar.style.width = '100%';
       setTimeout(() => { timerBar.style.width = '0%'; }, 50);
 
-      try {
-        await deleteDoc(doc(db, "group_messages", id));
-      } catch(e){}
-
       viewTimer = setTimeout(() => {
         stopViewingAndDestroy('Photo expired after 1.3 seconds.');
       }, 1300);
     }
 
-    function stopViewingAndDestroy(reason) {
+    async function stopViewingAndDestroy(reason) {
       if (viewTimer) clearTimeout(viewTimer);
       viewTimer = null;
       isHolding = false;
+
+      if (currentActiveMessage && currentActiveMessage.id) {
+        try {
+          await deleteDoc(doc(db, "group_messages", currentActiveMessage.id));
+        } catch(e){}
+      }
 
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
@@ -572,26 +587,4 @@
 
     window.closeAndDestroyViewer = (reason) => {
       if (viewTimer) clearTimeout(viewTimer);
-      viewTimer = null;
-      isHolding = false;
-
-      const zone = document.getElementById('touch-hold-zone');
-      zone.removeEventListener('touchstart', handleTouchStart);
-      zone.removeEventListener('touchend', handleTouchEnd);
-      zone.removeEventListener('touchcancel', handleTouchEnd);
-      zone.removeEventListener('mousedown', handleMouseDown);
-      zone.removeEventListener('mouseup', handleMouseUp);
-
-      if (cameraStream) {
-        cameraStream.getTracks().forEach(track => track.stop());
-        cameraStream = null;
-      }
-
-      currentActiveMessage = null;
-      storedImageData = null;
-      document.getElementById('viewer-modal').classList.add('hidden');
-      document.getElementById('viewer-modal').classList.remove('flex');
-    };
-  </script>
-</body>
-</html>
+      viewTimer = null
