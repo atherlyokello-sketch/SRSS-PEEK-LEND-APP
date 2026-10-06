@@ -494,35 +494,49 @@
       }
     };
 
-    // Downscale to a max edge, then lower JPEG quality / size until the
-    // data URL fits comfortably under Firestore's 1MB document limit.
-    function compressImage(file, maxBytes = 700 * 1024) {
+    // Accepts ANY phone photo (any resolution / size). Decodes it, then keeps
+    // shrinking dimensions and JPEG quality until the result is guaranteed to
+    // fit under Firestore's 1MB document limit.
+    async function loadImageSource(file) {
+      // Preferred path: createImageBitmap (handles huge images + EXIF rotation efficiently)
+      if (window.createImageBitmap) {
+        try {
+          const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+          return { src: bmp, width: bmp.width, height: bmp.height };
+        } catch (e) { /* fall through to <img> */ }
+      }
       return new Promise((resolve, reject) => {
         const url = URL.createObjectURL(file);
         const img = new Image();
+        img.onload = () => { URL.revokeObjectURL(url); resolve({ src: img, width: img.naturalWidth || img.width, height: img.naturalHeight || img.height }); };
         img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode failed')); };
-        img.onload = () => {
-          URL.revokeObjectURL(url);
-          let maxEdge = 1280;
-          let quality = 0.8;
-          for (let attempt = 0; attempt < 8; attempt++) {
-            const scale = Math.min(1, maxEdge / Math.max(img.width, img.height));
-            const canvas = document.createElement('canvas');
-            canvas.width = Math.max(1, Math.round(img.width * scale));
-            canvas.height = Math.max(1, Math.round(img.height * scale));
-            const ctx = canvas.getContext('2d');
-            ctx.fillStyle = '#000';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-            const out = canvas.toDataURL('image/jpeg', quality);
-            if (out.length <= maxBytes * 1.37) return resolve(out); // base64 overhead
-            quality = Math.max(0.4, quality - 0.1);
-            maxEdge = Math.round(maxEdge * 0.8);
-          }
-          resolve(null);
-        };
         img.src = url;
       });
+    }
+
+    async function compressImage(file, maxChars = 900 * 1024) {
+      const { src, width, height } = await loadImageSource(file);
+      let maxEdge = 1600;
+      let quality = 0.82;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const scale = Math.min(1, maxEdge / Math.max(width, height));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+        const out = canvas.toDataURL('image/jpeg', quality);
+        if (out.length <= maxChars) {
+          if (src.close) src.close();
+          return out;
+        }
+        quality = Math.max(0.35, quality - 0.08);
+        maxEdge = Math.max(240, Math.round(maxEdge * 0.8));
+      }
+      if (src.close) src.close();
+      return null;
     }
 
     // FIX: wait for the camera to actually have a usable frame before
