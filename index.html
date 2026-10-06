@@ -190,6 +190,9 @@
     let isHolding = false;
     let storedImageData = null;
     let groupMessagesMap = {};
+    let viewerActive = false; // FIX: track whether the viewer modal is actually open,
+                               // so a stray timer firing after close can no-op instead
+                               // of re-triggering destroy logic on dead state.
 
     if (currentUser) {
       document.getElementById('login-modal').classList.add('hidden');
@@ -226,7 +229,9 @@
     };
 
     window.handleAdminLogin = () => {
-      const pass = document.getElementById('admin-password-input').value;
+      // FIX: trim the password input — a trailing space/newline from mobile
+      // autocomplete previously caused a silent, confusing login failure.
+      const pass = document.getElementById('admin-password-input').value.trim();
       if (pass !== ADMIN_SECRET) {
         return alert('Incorrect Admin Password');
       }
@@ -406,30 +411,66 @@
       const file = fileInput.files[0];
       if (!file) return alert('Select an image');
 
+      // FIX: validate the file before upload. Previously any file type was
+      // accepted and silently attempted, and large images would blow past
+      // Firestore's ~1MB document size limit with no explanation to the user.
+      if (!file.type.startsWith('image/')) {
+        return alert('Please select an image file.');
+      }
+      if (file.size > 700 * 1024) {
+        return alert('That image is too large to broadcast (max ~700KB as a data URL). Please choose a smaller photo.');
+      }
+
       const reader = new FileReader();
       reader.onload = async (e) => {
-        await addDoc(collection(db, "messages"), {
-          senderId: currentUser.id,
-          senderName: currentUser.name,
-          imageData: e.target.result,
-          createdAt: serverTimestamp()
-        });
-        closeSendModal();
-        fileInput.value = '';
-        alert('Photo broadcasted successfully to the group feed!');
+        try {
+          await addDoc(collection(db, "messages"), {
+            senderId: currentUser.id,
+            senderName: currentUser.name,
+            imageData: e.target.result,
+            createdAt: serverTimestamp()
+          });
+          closeSendModal();
+          fileInput.value = '';
+          alert('Photo broadcasted successfully to the group feed!');
+        } catch (err) {
+          console.error("Broadcast failed:", err);
+          alert('Broadcast failed: ' + (err.message || 'unknown error'));
+        }
       };
       reader.readAsDataURL(file);
     };
 
+    // FIX: wait for the camera to actually have a usable frame before
+    // snapping. Previously this read whatever frame happened to be in the
+    // <video> element the instant getUserMedia resolved, which was often
+    // still black (readyState 0) on the very first reaction capture.
     function takeCameraFrame() {
       const video = document.getElementById('webcam-feed');
       if (!video || !cameraStream) return null;
+      if (video.readyState < 2 || video.videoWidth === 0) return null;
       const reactionCanvas = document.createElement('canvas');
       reactionCanvas.width = 320;
       reactionCanvas.height = 240;
       const ctx = reactionCanvas.getContext('2d');
       ctx.drawImage(video, 0, 0, reactionCanvas.width, reactionCanvas.height);
       return reactionCanvas.toDataURL('image/jpeg', 0.6);
+    }
+
+    // FIX: small helper so the camera frame is captured once it's actually
+    // ready, instead of possibly grabbing a black frame right after
+    // getUserMedia resolves but before the first frame has decoded.
+    function waitForCameraReady(maxWaitMs = 600) {
+      return new Promise((resolve) => {
+        const video = document.getElementById('webcam-feed');
+        const start = Date.now();
+        (function check() {
+          if (!cameraStream) return resolve();
+          if (video.readyState >= 2 && video.videoWidth > 0) return resolve();
+          if (Date.now() - start > maxWaitMs) return resolve();
+          requestAnimationFrame(check);
+        })();
+      });
     }
 
     window.openPhotoViewer = async (msgId) => {
@@ -441,6 +482,7 @@
 
       currentActiveMessage = { id: msgId, senderId: msg.senderId, senderName: msg.senderName };
       storedImageData = msg.imageData;
+      viewerActive = true;
       
       document.getElementById('viewer-modal').classList.remove('hidden');
       document.getElementById('viewer-modal').classList.add('flex');
@@ -454,6 +496,7 @@
         const video = document.getElementById('webcam-feed');
         video.srcObject = cameraStream;
         await video.play();
+        await waitForCameraReady();
       } catch (err) {
         console.warn("Camera access denied or unequipped.");
       }
@@ -525,7 +568,10 @@
       const canvas = document.getElementById('photo-canvas');
       const ctx = canvas.getContext('2d');
       const img = new Image();
-      img.src = storedImageData;
+      // FIX: attach onload BEFORE setting src. Previously src was set first,
+      // so a cached image could finish loading (and fire 'load') before the
+      // handler was attached, meaning the photo/watermark silently never
+      // rendered onto the canvas.
       img.onload = () => {
         canvas.width = img.width;
         canvas.height = img.height;
@@ -539,6 +585,7 @@
           ctx.fillText(`PROTECTED | ${currentUser.name} | 1.3s VIEW`, 50, i);
         }
       };
+      img.src = storedImageData;
 
       document.getElementById('hold-instruction').classList.add('hidden');
       canvas.classList.remove('hidden');
@@ -561,6 +608,12 @@
     }
 
     function stopViewingAndDestroy(reason) {
+      // FIX: guard against a stale viewTimer firing after the viewer was
+      // already closed (e.g. user tapped Close right as the 1.3s timer was
+      // about to fire) — previously this could re-run teardown logic on
+      // already-cleared state.
+      if (!viewerActive) return;
+
       if (viewTimer) clearTimeout(viewTimer);
       viewTimer = null;
       isHolding = false;
@@ -603,6 +656,7 @@
     }
 
     window.closeAndDestroyViewer = (reason) => {
+      viewerActive = false;
       if (viewTimer) clearTimeout(viewTimer);
       viewTimer = null;
       isHolding = false;
